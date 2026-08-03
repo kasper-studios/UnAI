@@ -362,11 +362,27 @@ if hook is not None:
     Ok(())
 }
 
-/// Marketplace index: main/wsmarketplace/index.json → { id: {repo, ref, path, description} }
+/// Marketplace index: { id: {repo, ref, path, description} }
+/// Берётся из ОСНОВНОЙ репы (kasper-studios/UnAI): локальная папка
+/// `wsmarketplace/index.json` — dev-оверрайд; при её отсутствии индекс
+/// скачивается с raw.githubusercontent.com.
 fn marketplace_index(root: &PathBuf) -> Result<serde_json::Value> {
     let idx = root.join("wsmarketplace").join("index.json");
-    let raw = std::fs::read_to_string(&idx)
-        .with_context(|| format!("read marketplace index {}", idx.display()))?;
+
+    let raw: String = if idx.exists() {
+        std::fs::read_to_string(&idx)
+            .with_context(|| format!("read marketplace index {}", idx.display()))?
+    } else {
+        // Индекс живёт в основной репе; тяну raw-файл с GitHub.
+        let url = "https://raw.githubusercontent.com/kasper-studios/UnAI/main/wsmarketplace/index.json";
+        let body = reqwest::blocking::get(url)
+            .with_context(|| format!("fetch marketplace index from {url}"))?
+            .error_for_status()
+            .context("marketplace index HTTP error")?
+            .text()
+            .context("marketplace index body")?;
+        body
+    };
     serde_json::from_str(&raw).context("parse marketplace index.json")
 }
 
@@ -384,18 +400,7 @@ fn fetch_workspace_package(root: &PathBuf, id: &str, local_path: Option<&str>) -
         return Ok(if pkg.exists() { pkg } else { src });
     }
 
-    // 2) Локальный wsrepos/<id> (dev-режим)
-    let wsrepos = dirs_home()
-        .join("Desktop")
-        .join("projects")
-        .join("UnAI")
-        .join("wsrepos")
-        .join(id);
-    if wsrepos.join("workspace").exists() {
-        return Ok(wsrepos.join("workspace"));
-    }
-
-    // 3) Marketplace index → git clone в temp
+    // 2) Marketplace index → git clone в temp
     let index = marketplace_index(root)?;
     let entry = index
         .get(id)
