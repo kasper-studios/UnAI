@@ -23,6 +23,12 @@ enum Commands {
         #[arg(long)]
         force: bool,
     },
+    /// Update UnAI CLI binary and Python runtime to latest version
+    Update {
+        /// Skip CLI binary update (only update Python runtime)
+        #[arg(long)]
+        runtime_only: bool,
+    },
     /// Workspace management: list / add / remove
     Workspace {
         #[command(subcommand)]
@@ -136,6 +142,7 @@ fn main() -> Result<()> {
         Commands::Version => cmd_version(&root),
         Commands::Doctor => cmd_doctor(&root),
         Commands::Install { force } => cmd_install(&root, force),
+        Commands::Update { runtime_only } => cmd_update(&root, runtime_only),
         Commands::Workspace { command } => cmd_workspace(&root, command),
         Commands::Config { id } => cmd_config(&root, &id),
     }
@@ -232,6 +239,187 @@ fn cmd_install(root: &PathBuf, force: bool) -> Result<()> {
         println!("warn: editable install failed (runtime not on PATH): {}", String::from_utf8_lossy(&pip.stderr));
     }
     println!("done. (unai doctor) to verify.");
+    Ok(())
+}
+
+fn cmd_update(_root: &PathBuf, runtime_only: bool) -> Result<()> {
+    println!("=== UnAI Update ===\n");
+
+    // 1. Update CLI binary (unless --runtime-only)
+    if !runtime_only {
+        println!("Checking for CLI binary updates...");
+        let current_exe = std::env::current_exe().context("cannot determine current binary path")?;
+        
+        // Try to fetch latest release from GitHub
+        let repo = "kasper-studios/UnAI";
+        let url = format!("https://api.github.com/repos/{}/releases/latest", repo);
+        
+        match reqwest::blocking::get(&url) {
+            Ok(resp) if resp.status().is_success() => {
+                let json: serde_json::Value = resp.json()?;
+                let tag = json["tag_name"].as_str().unwrap_or("unknown");
+                println!("  Latest release: {}", tag);
+                
+                // Detect platform
+                let os = std::env::consts::OS;
+                let arch = std::env::consts::ARCH;
+                let target = match (os, arch) {
+                    ("linux", "x86_64") => "x86_64-unknown-linux-musl",
+                    ("linux", "aarch64") => "aarch64-unknown-linux-musl",
+                    ("macos", "x86_64") => "x86_64-apple-darwin",
+                    ("macos", "aarch64") => "aarch64-apple-darwin",
+                    _ => {
+                        println!("  ⚠ Pre-built binary not available for {}-{}", os, arch);
+                        println!("  Skipping CLI update (use source build manually if needed)");
+                        return update_python_runtime();
+                    }
+                };
+                
+                let download_url = format!(
+                    "https://github.com/{}/releases/download/{}/unai-{}",
+                    repo, tag, target
+                );
+                
+                println!("  Downloading {}...", download_url);
+                match reqwest::blocking::get(&download_url) {
+                    Ok(resp) if resp.status().is_success() => {
+                        let bytes = resp.bytes()?;
+                        
+                        // Write to temp file, then replace current binary
+                        let temp_path = current_exe.with_extension("new");
+                        std::fs::write(&temp_path, &bytes)?;
+                        
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::PermissionsExt;
+                            let mut perms = std::fs::metadata(&temp_path)?.permissions();
+                            perms.set_mode(0o755);
+                            std::fs::set_permissions(&temp_path, perms)?;
+                        }
+                        
+                        // Atomic replace
+                        std::fs::rename(&temp_path, &current_exe)?;
+                        println!("  ✓ CLI binary updated to {}", tag);
+                    }
+                    Ok(resp) => {
+                        println!("  ⚠ Binary not found for this platform ({})", resp.status());
+                        println!("  Skipping CLI update");
+                    }
+                    Err(e) => {
+                        println!("  ⚠ Download failed: {}", e);
+                        println!("  Skipping CLI update");
+                    }
+                }
+            }
+            Ok(resp) => {
+                println!("  ⚠ No releases found ({})", resp.status());
+                println!("  Skipping CLI update");
+            }
+            Err(e) => {
+                println!("  ⚠ Failed to check for updates: {}", e);
+                println!("  Skipping CLI update");
+            }
+        }
+        println!();
+    }
+
+    // 2. Update Python runtime
+    update_python_runtime()
+}
+
+fn update_python_runtime() -> Result<()> {
+    println!("Updating Python runtime...");
+    
+    let unai_home = dirs_home().join(".unai");
+    let src_dir = unai_home.join("src").join("main");
+    
+    if src_dir.exists() {
+        println!("  Pulling latest changes from GitHub...");
+        let out = run(
+            std::process::Command::new("git")
+                .args(["pull", "origin", "main"])
+                .current_dir(&src_dir)
+        )?;
+        
+        if !out.status.success() {
+            println!("  ⚠ git pull failed: {}", String::from_utf8_lossy(&out.stderr));
+            return Ok(());
+        }
+        
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        if stdout.contains("Already up to date") {
+            println!("  ✓ Runtime already up to date");
+        } else {
+            println!("  ✓ Runtime updated");
+            
+            // Reinstall Python package
+            println!("  Reinstalling Python package...");
+            if let Some(py) = venv_python(&src_dir) {
+                let pip = run(
+                    std::process::Command::new(&py)
+                        .args(["-m", "pip", "install", "-q", "-e", "."])
+                        .current_dir(&src_dir)
+                )?;
+                
+                if pip.status.success() {
+                    println!("  ✓ Package reinstalled");
+                } else {
+                    println!("  ⚠ Package reinstall failed: {}", String::from_utf8_lossy(&pip.stderr));
+                }
+            }
+        }
+    } else {
+        println!("  No existing runtime installation found at {}", src_dir.display());
+        println!("  Installing runtime from GitHub...");
+        
+        std::fs::create_dir_all(&unai_home.join("src"))?;
+        
+        let out = run(
+            std::process::Command::new("git")
+                .args([
+                    "clone",
+                    "--depth", "1",
+                    "https://github.com/kasper-studios/UnAI.git",
+                    src_dir.to_str().unwrap()
+                ])
+        )?;
+        
+        if !out.status.success() {
+            anyhow::bail!("git clone failed: {}", String::from_utf8_lossy(&out.stderr));
+        }
+        
+        println!("  ✓ Runtime cloned");
+        
+        // Create venv and install
+        println!("  Creating venv...");
+        let venv_out = run(
+            std::process::Command::new("python3")
+                .args(["-m", "venv", ".venv"])
+                .current_dir(&src_dir)
+        )?;
+        
+        if !venv_out.status.success() {
+            anyhow::bail!("venv creation failed: {}", String::from_utf8_lossy(&venv_out.stderr));
+        }
+        
+        if let Some(py) = venv_python(&src_dir) {
+            println!("  Installing runtime package...");
+            let pip = run(
+                std::process::Command::new(&py)
+                    .args(["-m", "pip", "install", "-q", "-e", "."])
+                    .current_dir(&src_dir)
+            )?;
+            
+            if pip.status.success() {
+                println!("  ✓ Runtime installed");
+            } else {
+                println!("  ⚠ Package install failed: {}", String::from_utf8_lossy(&pip.stderr));
+            }
+        }
+    }
+    
+    println!("\n=== Update Complete ===");
+    println!("Run `unai --version` to verify.");
     Ok(())
 }
 
