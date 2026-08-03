@@ -1,0 +1,8 @@
+{
+  "example": {
+    "repo": "kasper-studios/unai-example-workspace",
+    "ref": "main",
+    "path": "workspace",
+    "description": "Template workspace for UnAI — demonstrates packaging, install, lifecycle."
+  }
+}
