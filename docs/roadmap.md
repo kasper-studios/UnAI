@@ -42,6 +42,7 @@
 - [ ] CLI `unai workspace list` парсит `wsmarketplace/` и показывает доступные пакеты.
 - [ ] CLI `unai workspace install <id>` копирует/симлинкит выбранный воркспейс в `src/unai/workspaces/` и регистрирует его в ядре.
 - [ ] Marketplace не требует отдельного сервера — каталог живёт в том же репо, что и ядро.
+- [ ] **Репо воркспейсов живут в `wsrepos/`** (отдельные git-репо рядом с ядром). CLI `install` клонирует из `wsrepos/<id>` в `src/unai/workspaces/`. Так ядро и ворспейсы — разные репо, но индексируются единым каталогом `wsmarketplace/`.
 
 ## Phase 6 — Distributed Nodes
 - [ ] Планшет (Termux / Python Runtime) как удалённый узел.
