@@ -50,6 +50,16 @@ enum WorkspaceCmd {
         #[arg(value_name = "WS_ID")]
         id: String,
     },
+    /// Enable a workspace (started by default on runtime launch)
+    Enable {
+        #[arg(value_name = "WS_ID")]
+        id: String,
+    },
+    /// Disable a workspace (NOT started on launch; kept in registry)
+    Disable {
+        #[arg(value_name = "WS_ID")]
+        id: String,
+    },
 }
 
 const VENV_DIR: &str = ".venv";
@@ -202,7 +212,16 @@ fn cmd_workspace(root: &PathBuf, cmd: WorkspaceCmd) -> Result<()> {
                 for e in entries.flatten() {
                     if let Some(name) = e.file_name().to_str() {
                         if name.ends_with(".py") && name != "__init__.py" {
-                            println!("  - {}", name.trim_end_matches(".py"));
+                            let id = name.trim_end_matches(".py");
+                            let enabled = workspace_enabled(root, id);
+                            let default_enabled = workspace_default_enabled(root, id);
+                            let status = if enabled {
+                                "● Enabled"
+                            } else {
+                                "○ Disabled"
+                            };
+                            let dflt = if default_enabled { "(default: on)" } else { "" };
+                            println!("  {status:12} {id} {dflt}");
                         }
                     }
                 }
@@ -214,8 +233,70 @@ fn cmd_workspace(root: &PathBuf, cmd: WorkspaceCmd) -> Result<()> {
         WorkspaceCmd::Remove { id } => {
             println!("workspace remove: {id} (pending — marketplace in Phase 5)")
         }
+        WorkspaceCmd::Enable { id } => {
+            let state = workspace_state_path(root, &id);
+            std::fs::create_dir_all(state.parent().context("no state parent")?)?;
+            std::fs::write(&state, "{\"enabled\": true}\n")?;
+            println!("workspace '{id}' enabled (started on next runtime launch)");
+        }
+        WorkspaceCmd::Disable { id } => {
+            let state = workspace_state_path(root, &id);
+            std::fs::create_dir_all(state.parent().context("no state parent")?)?;
+            std::fs::write(&state, "{\"enabled\": false}\n")?;
+            println!("workspace '{id}' disabled (kept in registry)");
+        }
     }
     Ok(())
+}
+
+/// Путь к файлу состояния воркспейса: .unai/workspaces/<id>/state.json
+fn workspace_state_path(root: &PathBuf, id: &str) -> PathBuf {
+    root.join(".unai")
+        .join("workspaces")
+        .join(id)
+        .join("state.json")
+}
+
+/// Состояние воркспейса: enabled (включён, может стартовать) / disabled.
+/// Если файла state.json нет — состояние берётся из `default_enabled` манифеста.
+fn workspace_enabled(root: &PathBuf, id: &str) -> bool {
+    let state = workspace_state_path(root, id);
+    match std::fs::read_to_string(&state) {
+        Ok(raw) => raw.contains("\"enabled\": true"),
+        // Нет state-файла → доверяем рекомендации автора (default_enabled из манифеста)
+        Err(_) => workspace_default_enabled(root, id),
+    }
+}
+
+/// Прочитать `default_enabled` из манифеста воркспейса (через venv-python).
+/// По умолчанию false — если модуль не найден или поле не задано.
+fn workspace_default_enabled(root: &PathBuf, id: &str) -> bool {
+    let py = match venv_python(root) {
+        Some(p) => p,
+        None => return false,
+    };
+    let code = format!(
+        r#"
+import json, sys
+sys.path.insert(0, '{}')
+try:
+    import unai.workspaces.{id} as m
+    for attr in dir(m):
+        obj = getattr(m, attr)
+        if hasattr(obj, 'default_enabled'):
+            print(json.dumps(bool(obj.default_enabled)))
+            break
+    else:
+        print('false')
+except Exception:
+    print('false')
+"#,
+        root.join("src").display()
+    );
+    match run(std::process::Command::new(&py).arg("-c").arg(&code)) {
+        Ok(out) => String::from_utf8_lossy(&out.stdout).trim() == "true",
+        Err(_) => false,
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -42,6 +42,15 @@ async def test_workspace_registered_and_capabilities_resolve():
 
 
 @pytest.mark.asyncio
+async def test_workspace_default_enabled_false():
+    """ExampleWorkspace — демо: автор рекомендует НЕ стартовать сам по умолчанию."""
+    bus, discovery = InMemoryBus(), InMemoryDiscovery()
+    ws = ExampleWorkspace("example-1", bus)
+
+    assert ws.manifest.default_enabled is False
+
+
+@pytest.mark.asyncio
 async def test_echo_call_dispatched_and_response_published():
     bus, discovery = InMemoryBus(), InMemoryDiscovery()
     kernel = Microkernel(bus, discovery, _build_graph())

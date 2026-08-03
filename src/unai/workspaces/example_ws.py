@@ -73,6 +73,8 @@ class ExampleWorkspace:
             features={"notifications": True, "settings": True},
             # Декларативная СХЕМА настроек (не значения!)
             settings=EXAMPLE_SETTINGS_SCHEMA,
+            # Рекомендация автора: example — демо, не стартует сам по умолчанию.
+            default_enabled=False,
         )
         self._sub_ids: list[str] = []
         self._notifications: list[dict] = []  # локальный лог уведомлений

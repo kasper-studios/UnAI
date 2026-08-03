@@ -101,6 +101,7 @@ class RuntimeManifest:
     metadata: Dict[str, Any] = field(default_factory=dict)
     features: Dict[str, bool] = field(default_factory=dict) # Опциональные фичи воркспейса (notifications, background, persistent, settings)
     settings: Optional[SettingsSchema] = None  # Декларативная схема настроек (не значения!)
+    default_enabled: bool = False  # Рекомендация автора воркспейса (НЕ текущее состояние!).
 
 # Alias for backward compatibility and semantic clarity in workspace context
 WorkspaceManifest = RuntimeManifest

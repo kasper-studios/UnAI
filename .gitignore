@@ -40,6 +40,9 @@ htmlcov/
 # Rust cargo build artifacts
 unai-cli/target/
 
+# Local workspace state (settings/state per-installation, NOT part of the repo)
+.unai/
+
 # Editor / OS
 .DS_Store
 .idea/
