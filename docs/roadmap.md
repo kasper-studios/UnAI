@@ -18,7 +18,7 @@
 - [x] System Bus как единый событийный бэкбон: `emit` / `subscribe` / `unsubscribe`.
 - [x] Notification Service — тонкий слой над шиной без пуллов (`services/notifications.py`).
 - [x] `event: workspace.notification` → Notification Service → `check_notify` (без опросов).
-- [ ] Status Service на `event: workspace.status.changed` (обновляет статус Дирома в Discord) — после CLI/интеграции.
+- [ ] Status Service на `event: workspace.status.changed` — обновляет статус агента в Discord.
 - [ ] Логирование и метрики как ещё два подписчика на ту же шину.
 
 ## Phase 3 — Rust CLI (`unai`) — `ADR-0001` ✅
@@ -30,10 +30,10 @@
 - [ ] Бутстрап: `uvx unai …` / `python -m unai install` (часть 3).
 - [ ] Расширение: `update`, `self-update`, `repair`, `backup/restore`, `extension status`.
 
-## Phase 4 — Workspace SDK + Browser (KasperBridge)
+## Phase 4 — Workspace SDK + Browser (built-in)
 - [ ] Workspace SDK: контракт, чей манифест + фичи + `emit`-подписка.
-- [ ] Web Workspace (KasperBridge / Tampermonkey): `dom.query`, `dom.click`, `dom.type`, `dom.wait`, MutationObserver, смена URL.
-- [ ] Firefox (основной) и Chrome (песочница, аккаунт «Диром/Hermes»); расширение рапортует, из какого браузера какает.
+- [ ] Web Workspace (built-in browser): `dom.query`, `dom.click`, `dom.type`, `dom.wait`, MutationObserver, смена URL.
+- [ ] Firefox (основной) и Chrome (песочница); расширение рапортует, из какого браузера какает.
 
 ## Phase 5 — Marketplace Workspaces (Discord → Telegram → …)
 - [ ] Браузер — built-in воркспейс ядра по умолчанию (`ADR-0002`).
