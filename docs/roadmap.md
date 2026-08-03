@@ -31,16 +31,17 @@
 - [ ] Расширение: `update`, `self-update`, `repair`, `backup/restore`, `extension status`.
 
 ## Phase 4 — Workspace SDK + Browser (built-in)
+Цель: контракт воркспейса и единственный встроенный воркспейс.
 - [ ] Workspace SDK: контракт, чей манифест + фичи + `emit`-подписка.
 - [ ] Web Workspace (built-in browser): `dom.query`, `dom.click`, `dom.type`, `dom.wait`, MutationObserver, смена URL.
 - [ ] Firefox (основной) и Chrome (песочница); расширение рапортует, из какого браузера какает.
 
-## Phase 5 — Marketplace Workspaces (Discord → Telegram → …)
-- [ ] Браузер — built-in воркспейс ядра по умолчанию (`ADR-0002`).
-- [ ] Пакет **Discord Workspace (Диром)**: нативный клиент вместо DOM-эмуляции — `discord.*` methods, `notifications`/`background`/`status`. Ставится `unai workspace install discord`.
-- [ ] Пакет **Telegram** как маркетплейс-воркспейс.
-- [ ] Токен-экономный контракт тулов: краткое описание + ссылка на `docs/tools/<tool>.md` (`ADR-0002 §4`).
-- [ ] Каталог/поиск по маркетплейсу (`unai workspace search`).
+## Phase 5 — Marketplace (`wsmarketplace/`)
+Цель: каталог доступных воркспейсов внутри репо, CLI читает его при `install`.
+- [ ] Папка `wsmarketplace/` в корне репо — каждый воркспейс отдельной директорией с манифестом (`ws.json`).
+- [ ] CLI `unai workspace list` парсит `wsmarketplace/` и показывает доступные пакеты.
+- [ ] CLI `unai workspace install <id>` копирует/симлинкит выбранный воркспейс в `src/unai/workspaces/` и регистрирует его в ядре.
+- [ ] Marketplace не требует отдельного сервера — каталог живёт в том же репо, что и ядро.
 
 ## Phase 6 — Distributed Nodes
 - [ ] Планшет (Termux / Python Runtime) как удалённый узел.
