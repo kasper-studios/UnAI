@@ -509,9 +509,12 @@ fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-/// Путь к файлу состояния воркспейса: .unai/workspaces/<id>/state.json
+/// Путь к файлу состояния воркспейса: ~/.unai/workspaces/<id>/state.json
+/// (рядом с кодом установленного воркспейса — ADR-0003).
 fn workspace_state_path(root: &PathBuf, id: &str) -> PathBuf {
-    root.join(".unai")
+    let _ = root; // корень проекта не нужен: состояние живёт в ~/.unai
+    dirs_home()
+        .join(".unai")
         .join("workspaces")
         .join(id)
         .join("state.json")
