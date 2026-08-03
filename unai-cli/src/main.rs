@@ -28,6 +28,12 @@ enum Commands {
         #[command(subcommand)]
         command: WorkspaceCmd,
     },
+    /// Interactive settings for a workspace (reads settings schema from its manifest)
+    Config {
+        /// Workspace id to configure
+        #[arg(value_name = "WS_ID")]
+        id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -88,6 +94,7 @@ fn main() -> Result<()> {
         Commands::Doctor => cmd_doctor(&root),
         Commands::Install { force } => cmd_install(&root, force),
         Commands::Workspace { command } => cmd_workspace(&root, command),
+        Commands::Config { id } => cmd_config(&root, &id),
     }
 }
 
@@ -201,8 +208,177 @@ fn cmd_workspace(root: &PathBuf, cmd: WorkspaceCmd) -> Result<()> {
                 }
             }
         }
-        WorkspaceCmd::Add { id } => println!("workspace add: {id} (pending — marketplace in Phase 5)"),
-        WorkspaceCmd::Remove { id } => println!("workspace remove: {id} (pending — marketplace in Phase 5)"),
+        WorkspaceCmd::Add { id } => {
+            println!("workspace add: {id} (pending — marketplace in Phase 5)")
+        }
+        WorkspaceCmd::Remove { id } => {
+            println!("workspace remove: {id} (pending — marketplace in Phase 5)")
+        }
     }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// `unai config <ws_id>` — декларативный интерактивный конфигуратор.
+// Читает settings-схему из манифеста воркспейса, строит UI, вызывает
+// `set_settings` воркспейса. Без единой ветки под конкретный воркспейс.
+// ---------------------------------------------------------------------------
+
+/// Найти файл модуля воркспейса: src/unai/workspaces/<id>.py
+fn workspace_module_path(root: &PathBuf, id: &str) -> Result<PathBuf> {
+    let path = root
+        .join("src")
+        .join("unai")
+        .join("workspaces")
+        .join(format!("{id}.py"));
+    if !path.exists() {
+        anyhow::bail!("workspace '{id}' not found in src/unai/workspaces/");
+    }
+    Ok(path)
+}
+
+fn cmd_config(root: &PathBuf, id: &str) -> Result<()> {
+    let module_path = workspace_module_path(root, id)?;
+    println!(
+        "loading settings schema for workspace '{id}' from {}",
+        module_path.display()
+    );
+
+    // Загружаем манифест через venv-питон: импортируем модуль воркспейса
+    // и просим его выдать settings-схему как JSON (значения — отдельно).
+    let py = venv_python(root).context("venv not found — run `unai install` first")?;
+    let code = format!(
+        r#"
+import json, sys
+sys.path.insert(0, '{}')
+from unai.workspaces.{id} import *
+import unai.workspaces.{id} as m
+# Если модуль экспортирует схему константой или манифестом, выводим её
+schema = getattr(m, 'EXAMPLE_SETTINGS_SCHEMA', None)
+if schema is None:
+    for attr in dir(m):
+        obj = getattr(m, attr)
+        if hasattr(obj, 'to_dict') and callable(getattr(obj, 'to_dict', None)):
+            schema = obj
+            break
+if schema is None:
+    print(json.dumps({{"error": "no settings schema found"}}))
+else:
+    print(json.dumps(schema.to_dict()))
+"#,
+        root.join("src").display()
+    );
+    let out = run(std::process::Command::new(&py).arg("-c").arg(&code))?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "failed to load settings schema: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let json_str = stdout.trim();
+    let schema: serde_json::Value = serde_json::from_str(json_str)
+        .map_err(|e| anyhow::anyhow!("schema parse failed: {e}\nraw: {json_str}"))?;
+
+    if schema.get("error").is_some() {
+        println!("workspace '{id}' has no settings schema (nothing to configure).");
+        return Ok(());
+    }
+
+    let title = schema
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or(id);
+    println!("== {title} ==");
+
+    let mut answers: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+    let items = schema.get("items").and_then(|v| v.as_object());
+
+    if let Some(items) = items {
+        for (key, item) in items {
+            let item_title = item
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or(key);
+            let item_type = item
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("text");
+            let default = item.get("default");
+
+            match item_type {
+                "choice" => {
+                    let choices: Vec<String> = item
+                        .get("choices")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|c| c.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    if choices.is_empty() {
+                        // Динамический выбор — пока заглушка (provider в Phase 5).
+                        println!("  [dynamic choice via provider — Phase 5] {item_title}");
+                        continue;
+                    }
+                    let default_idx = if let Some(d) = default.and_then(|d| d.as_str()) {
+                        choices.iter().position(|c| c == d).unwrap_or(0)
+                    } else {
+                        0
+                    };
+                    let sel = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                        .with_prompt(item_title)
+                        .items(&choices)
+                        .default(default_idx)
+                        .interact()?;
+                    answers.insert(key.clone(), serde_json::Value::String(choices[sel].clone()));
+                }
+                "action" => {
+                    let confirm = dialoguer::Confirm::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                        .with_prompt(format!("{item_title}? (выполнить действие)"))
+                        .default(false)
+                        .interact()?;
+                    if confirm {
+                        answers.insert(
+                            key.clone(),
+                            serde_json::Value::String("__trigger__".into()),
+                        );
+                    }
+                }
+                _ => {
+                    // text / custom
+                    let input = dialoguer::Input::<String>::with_theme(&dialoguer::theme::ColorfulTheme::default())
+                        .with_prompt(item_title)
+                        .default(
+                            default
+                                .and_then(|d| d.as_str())
+                                .unwrap_or_default()
+                                .to_string(),
+                        )
+                        .interact_text()?;
+                    answers.insert(key.clone(), serde_json::Value::String(input));
+                }
+            }
+        }
+    }
+
+    if answers.is_empty() {
+        println!("no answers collected (schema empty).");
+        return Ok(());
+    }
+
+    // Сохраняем в локальный стейт-файл воркспейса: .unai/workspaces/<id>/settings.json
+    let state_dir = root.join(".unai").join("workspaces").join(id);
+    std::fs::create_dir_all(&state_dir)
+        .with_context(|| format!("create state dir {}", state_dir.display()))?;
+    let settings_path = state_dir.join("settings.json");
+    std::fs::write(
+        &settings_path,
+        serde_json::to_string_pretty(&serde_json::Value::Object(answers))?,
+    )
+    .with_context(|| format!("write {}", settings_path.display()))?;
+    println!("saved settings -> {}", settings_path.display());
+
     Ok(())
 }

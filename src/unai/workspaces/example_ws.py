@@ -5,6 +5,9 @@
 2. Подписка на шину и диспатч вызовов (CALL) по методам.
 3. Эмит уведомлений (EVENT) в Notification Service через шину.
 4. Ответы (RESPONSE) на вызовы.
+5. **Декларативные настройки** (`settings` = SettingsSchema в манифесте):
+   CLI читает схему, строит UI, вызывает `get_settings` / `set_settings`;
+   воркспейс САМ хранит значения (здесь — в dict; в реальном — JSON/SQLite/Vault).
 
 Это НЕ полный воркспейс-контракт, а самый маленький рабочий пример для тестов ядра.
 """
@@ -14,15 +17,49 @@ import asyncio
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from unai.bus.interfaces import SystemBus
-from unai.common.protocol import Message, MessageType, RuntimeManifest, WorkspaceManifest
+from unai.common.protocol import (
+    Message,
+    MessageType,
+    RuntimeManifest,
+    WorkspaceManifest,
+    SettingsSchema,
+    SettingItem,
+)
 
 # Топики
 TOPIC_CALLS = "*"                    # диспатч любых CALL-ов, адресованных этому воркспейсу
 TOPIC_RESPONSES = "example.responses"   # где воркспейс публикует ответы
 
+#: Схема настроек — декларативная, CLI строит UI по ней, не зная воркспейс.
+EXAMPLE_SETTINGS_SCHEMA = SettingsSchema(
+    title="Example Settings",
+    description="Пример декларативных настроек воркспейса.",
+    items={
+        "mode": SettingItem(
+            type="choice",
+            title="Mode",
+            description="Режим работы воркспейса",
+            choices=["echo", "silent"],
+            default="echo",
+        ),
+        "label": SettingItem(
+            type="text",
+            title="Label",
+            description="Подпись воркспейса (кастомный ввод)",
+            default="Dirom",
+        ),
+        "greet": SettingItem(
+            type="action",
+            title="Say hello",
+            description="Вызвать метод example.greet (проверка action)",
+            action_method="example.greet",
+        ),
+    },
+)
+
 
 class ExampleWorkspace:
-    """Минимальный воркспейс: echo-методы + эмит уведомлений."""
+    """Минимальный воркспейс: echo-методы + эмит уведомлений + настройки."""
 
     def __init__(self, runtime_id: str, bus: SystemBus):
         self.runtime_id = runtime_id
@@ -30,13 +67,20 @@ class ExampleWorkspace:
         self.manifest = WorkspaceManifest(
             runtime_id=runtime_id,
             node_id="node-1",
-            methods=["example.echo"],
+            methods=["example.echo", "example.greet"],
             metadata={"name": "Example Workspace", "kind": "example"},
             # Опциональные фичи, которые ядро запомнит при регистрации.
             features={"notifications": True, "settings": True},
+            # Декларативная СХЕМА настроек (не значения!)
+            settings=EXAMPLE_SETTINGS_SCHEMA,
         )
         self._sub_ids: list[str] = []
         self._notifications: list[dict] = []  # локальный лог уведомлений
+        # Текущие значения — СОБСТВЕННОСТЬ воркспейса (здесь dict; в проде JSON/SQLite/Vault).
+        self._settings: dict[str, Any] = {
+            "mode": "echo",
+            "label": "Dirom",
+        }
 
     # --- Регистрация/подписки ---
 
@@ -55,11 +99,11 @@ class ExampleWorkspace:
         if msg.type != MessageType.CALL:
             return
         if msg.destination not in (TOPIC_CALLS, self.runtime_id, "*"):
-            # не адресовано нам
-            return
-        if msg.method != "example.echo":
-            return
-        await self._respond(msg, {"echo": msg.payload.get("value")})
+            return  # не адресовано нам
+        if msg.method == "example.echo":
+            await self._respond(msg, {"echo": msg.payload.get("value")})
+        elif msg.method == "example.greet":
+            await self._respond(msg, {"greeting": f"Привет, {self._settings.get('label', 'Dirom')}!"})
 
     async def _respond(self, req: Message, data: dict) -> None:
         resp = Message(
@@ -71,6 +115,21 @@ class ExampleWorkspace:
             payload=data,
         )
         await self.bus.publish(resp)
+
+    # --- Настройки (Settings API) ---
+
+    async def get_settings(self) -> dict:
+        """Вернуть текущие значения настроек (хранит сам воркспейс)."""
+        return dict(self._settings)
+
+    async def set_settings(self, values: dict) -> dict:
+        """Применить значения, сохранив их у себя.
+
+        CLI вызывает этот метод ПОСЛЕ того, как собрал ответы по схеме.
+        Воркспейс сам решает, куда писать: dict / JSON / SQLite / Vault / облако.
+        """
+        self._settings.update(values)
+        return dict(self._settings)
 
     # --- Уведомления (эмит в Notification Service) ---
 
