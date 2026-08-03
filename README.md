@@ -76,7 +76,7 @@ A workspace (web, Discord, Telegram, vault, python…) publishes its API — not
 - [ ] Event-driven Notification Center (subscribe to bus — next)
 - [ ] RPC Dispatcher
 - [ ] Real transports (UDS / WS / gRPC)
-- [ ] Native Discord Workspace (Dirom), web browser (KasperBridge), Telegram…
+- [ ] Native Discord Workspace, web browser, Telegram…
 
 ---
 
