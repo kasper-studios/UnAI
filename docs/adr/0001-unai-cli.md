@@ -70,7 +70,7 @@ unai extension status           # per-browser extension connection state
 - **Not a mandatory TUI.** A full TUI (ratatui) is an optional later layer on the same Rust crate; the CLI stays scriptable.
 
 ## 4. Открытые вопросы (Open Questions)
-1. Separate repo vs alongside `src/unai`? (Affects bootstrapping — still open.)
+1. ~~Separate repo vs alongside `src/unai`?~~ → **Решение: моно-репо**, `unai-cli/` рядом с `src/` (2026-08-03). Упрощает бутстрип (`CARGO_MANIFEST_DIR ·/.` = корень, прямой доступ к `pyproject.toml` и `src/unai`), не мешая независимой дистрибуции бинарника.
 2. How does the CLI provision a *workspace*'s own runtime deps for its venv — a workspace manifest drop-in, or per-workspace pyproject the CLI runs?
 3. Bootstrap before the Rust binary is built: `uvx unai …` / `python -m unai install`.
 4. Do we need an explicit `unai mcp` schema to declare an MCP server, or is it implicitly a workspace-level feature?

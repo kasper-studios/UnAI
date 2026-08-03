@@ -64,7 +64,7 @@ A workspace (web, Discord, Telegram, vault, python…) publishes its API — not
     └── common/            # protocol: Message, RuntimeManifest / WorkspaceManifest, features
 ```
 
-> **CLI:** `unai` is planned as a Rust binary (`docs/adr/0001-unai-cli.md`) — install, doctor,
+> **CLI:** `unai` is a Rust binary (`docs/adr/0001-unai-cli.md`, in `unai-cli/`) — install, doctor,
 > update and workspace management as a thin infra tool over the Python runtime.
 
 ## Status

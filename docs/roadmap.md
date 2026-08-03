@@ -21,13 +21,14 @@
 - [ ] Status Service на `event: workspace.status.changed` (обновляет статус Дирома в Discord) — после CLI/интеграции.
 - [ ] Логирование и метрики как ещё два подписчика на ту же шину.
 
-## Phase 3 — Rust CLI (`unai`) — `ADR-0001` ##
+## Phase 3 — Rust CLI (`unai`) — `ADR-0001` ✅
 Цель: единый управляющий бинарник над рантаймом.
-- [ ] Бутстрап-вариант до сборки: `uvx unai …` / `python -m unai install`.
-- [ ] `clap`: `install`, `doctor`, `update`, `self-update`, `repair`, `backup/restore`, `version`, `workspace (add|remove|list|update all)`, `extension status`.
-- [ ] Детектор MCP-клиентов (Claude Code, Codex, Cursor, VS Code) + авто-прописка конфигов.
-- [ ] `unai install` — сам ставит venv, зависимости, регистрирует Runtime.
-- [ ] `unai doctor` / `unai repair` — диагностика и починка окружения.
+- [x] Моно-репо: `unai-cli/` рядом с `src/` (`ADR-0001 §4`).
+- [x] `clap`: `version`, `doctor`, `install --force`, `workspace list` (реестр из `src/unai/workspaces/`).
+- [x] `doctor` — проверка venv/Python/Rust + импорт рантайма.
+- [x] `install` — создание venv + editable-установка рантайма.
+- [ ] Бутстрап: `uvx unai …` / `python -m unai install` (часть 3).
+- [ ] Расширение: `update`, `self-update`, `repair`, `backup/restore`, `extension status`.
 
 ## Phase 4 — Workspace SDK + Browser (KasperBridge)
 - [ ] Workspace SDK: контракт, чей манифест + фичи + `emit`-подписка.

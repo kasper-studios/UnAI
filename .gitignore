@@ -37,6 +37,9 @@ venv.bak/
 .coverage
 htmlcov/
 
+# Rust cargo build artifacts
+unai-cli/target/
+
 # Editor / OS
 .DS_Store
 .idea/
