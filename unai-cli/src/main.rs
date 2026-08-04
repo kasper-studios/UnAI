@@ -76,16 +76,6 @@ enum WorkspaceCmd {
         #[arg(value_name = "WS_ID")]
         id: String,
     },
-    /// Start a workspace now (calls run.py:start)
-    Start {
-        #[arg(value_name = "WS_ID")]
-        id: String,
-    },
-    /// Stop a workspace now (calls run.py:stop)
-    Stop {
-        #[arg(value_name = "WS_ID")]
-        id: String,
-    },
 }
 
 const VENV_DIR: &str = ".venv";
@@ -94,9 +84,11 @@ const PYPROJECT: &str = "pyproject.toml";
 const VENV_PY: &[&str] = &["bin/python", "Scripts/python.exe"];
 
 /// Project root = Папка, содержащая pyproject.toml (ядро UnAI).
-/// При прямом запуске бинарника CARGO_MANIFEST_DIR не задан, поэтому
-/// поднимаемся от текущей директории в поисках pyproject.toml.
+/// При прямом запуске бинарника CARGO_MANIFEST_DIR не задан.
+/// В продакшене всегда используем ~/.unai/src/main (runtime install dir).
+/// Fallback: поиск pyproject.toml от cwd (для dev-режима).
 fn project_root() -> PathBuf {
+    // 1. Если есть CARGO_MANIFEST_DIR (dev build) — используем его
     if let Ok(dir) = std::env::var("CARGO_MANIFEST_DIR") {
         let p = PathBuf::from(dir);
         if let Some(parent) = p.parent() {
@@ -108,7 +100,12 @@ fn project_root() -> PathBuf {
             return p;
         }
     }
-    // Runtime: поднимаемся от cwd (или используем cwd) до папки с pyproject.toml
+    // 2. Продакшн: runtime всегда в ~/.unai/src/main
+    let runtime = dirs_home().join(".unai").join("src").join("main");
+    if runtime.join(PYPROJECT).exists() {
+        return runtime;
+    }
+    // 3. Fallback: поиск от cwd (dev без CARGO_MANIFEST_DIR)
     let start = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let mut cur = Some(start.as_path());
     while let Some(d) = cur {
@@ -117,7 +114,8 @@ fn project_root() -> PathBuf {
         }
         cur = d.parent();
     }
-    start
+    // 4. Последний шанс: runtime dir (пусть дальше упадёт с понятной ошибкой)
+    runtime
 }
 
 fn venv_python(root: &PathBuf) -> Option<PathBuf> {
@@ -514,16 +512,6 @@ fn cmd_workspace(root: &PathBuf, cmd: WorkspaceCmd) -> Result<()> {
             std::fs::write(&state, "{\"enabled\": false}\n")?;
             println!("workspace '{id}' disabled (kept in registry)");
         }
-        WorkspaceCmd::Start { id } => {
-            let ws_path = installed_workspace_path(root, &id)?;
-            run_lifecycle_hook(root, &id, &ws_path, "start")?;
-            println!("workspace '{id}' started");
-        }
-        WorkspaceCmd::Stop { id } => {
-            let ws_path = installed_workspace_path(root, &id)?;
-            run_lifecycle_hook(root, &id, &ws_path, "stop")?;
-            println!("workspace '{id}' stopped");
-        }
     }
     Ok(())
 }
@@ -536,16 +524,6 @@ fn dirs_home() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-/// Путь к установленному воркспейсу: сначала ~/.unai/workspaces/<id>,
-/// затем (fallback) bundled src/unai/workspaces/<id>.py.
-fn installed_workspace_path(root: &PathBuf, id: &str) -> Result<PathBuf> {
-    let home_ws = dirs_home().join(".unai").join("workspaces").join(id);
-    if home_ws.join("manifest.toml").exists() {
-        return Ok(home_ws);
-    }
-    let bundled = workspace_module_path(root, id)?;
-    Ok(bundled.parent().unwrap_or(root).to_path_buf())
-}
 
 /// Выполнить lifecycle-хук run.py:<hook>() в контексте воркспейса.
 /// run.py кладём в sys.path (корень воркспейса), вызываем hook-функцию.
