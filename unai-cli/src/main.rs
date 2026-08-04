@@ -40,6 +40,8 @@ enum Commands {
         #[arg(value_name = "WS_ID")]
         id: String,
     },
+    /// Start MCP server for connected AI agents
+    Serve,
 }
 
 #[derive(Subcommand)]
@@ -145,6 +147,7 @@ fn main() -> Result<()> {
         Commands::Update { runtime_only } => cmd_update(&root, runtime_only),
         Commands::Workspace { command } => cmd_workspace(&root, command),
         Commands::Config { id } => cmd_config(&root, &id),
+        Commands::Serve => cmd_serve(&root),
     }
 }
 
@@ -155,6 +158,35 @@ fn cmd_version(_root: &PathBuf) -> Result<()> {
         pyproject_version().unwrap_or_else(|_| "unknown".into())
     );
     println!("protocol: 1.0");
+    Ok(())
+}
+
+fn cmd_serve(_root: &PathBuf) -> Result<()> {
+    // MCP server uses the runtime venv from ~/.unai/src/main/.venv, NOT the project-local .venv
+    let unai_home = dirs_home().join(".unai");
+    let runtime_dir = unai_home.join("src").join("main");
+    
+    let py = venv_python(&runtime_dir)
+        .or_else(|| venv_python(_root)) // Fallback: project .venv
+        .or_else(|| Some(PathBuf::from("python3"))) // system python3
+        .context("python3 not found")?;
+    
+    // Run python -m unai.mcp with src/ appended to PYTHONPATH
+    // (don't replace — keep existing venv's editable install paths)
+    let status = std::process::Command::new(&py)
+        .arg("-m")
+        .arg("unai.mcp")
+        .env("PYTHONPATH", {
+            let src = runtime_dir.join("src");
+            let existing = std::env::var("PYTHONPATH").unwrap_or_default();
+            if existing.is_empty() { src.to_string_lossy().to_string() }
+            else { format!("{}:{}", src.display(), existing) }
+        })
+        .status()?;
+        
+    if !status.success() {
+        anyhow::bail!("MCP server exited with status: {}", status);
+    }
     Ok(())
 }
 
@@ -211,6 +243,7 @@ fn cmd_doctor(root: &PathBuf) -> Result<()> {
     Ok(())
 }
 
+
 fn cmd_install(root: &PathBuf, force: bool) -> Result<()> {
     let venv = root.join(VENV_DIR);
     if venv.exists() && !force {
@@ -241,6 +274,7 @@ fn cmd_install(root: &PathBuf, force: bool) -> Result<()> {
     println!("done. (unai doctor) to verify.");
     Ok(())
 }
+
 
 fn cmd_update(_root: &PathBuf, runtime_only: bool) -> Result<()> {
     println!("=== UnAI Update ===\n");
@@ -423,6 +457,7 @@ fn update_python_runtime() -> Result<()> {
     Ok(())
 }
 
+
 fn cmd_workspace(root: &PathBuf, cmd: WorkspaceCmd) -> Result<()> {
     match cmd {
         WorkspaceCmd::List => {
@@ -493,6 +528,7 @@ fn cmd_workspace(root: &PathBuf, cmd: WorkspaceCmd) -> Result<()> {
     Ok(())
 }
 
+
 /// Home directory (без внешней зависимости от home crate — берём из env).
 fn dirs_home() -> PathBuf {
     std::env::var_os("HOME")
@@ -549,6 +585,7 @@ if hook is not None:
     }
     Ok(())
 }
+
 
 /// Marketplace index: { id: {repo, ref, path, description} }
 /// Берётся из ОСНОВНОЙ репы (kasper-studios/UnAI): локальная папка
@@ -652,6 +689,7 @@ fn cmd_workspace_install(root: &PathBuf, id: &str, local_path: Option<&str>) -> 
     Ok(())
 }
 
+
 fn cmd_workspace_uninstall(root: &PathBuf, id: &str) -> Result<()> {
     let dest = dirs_home().join(".unai").join("workspaces").join(id);
     if !dest.exists() {
@@ -672,6 +710,7 @@ fn cmd_workspace_uninstall(root: &PathBuf, id: &str) -> Result<()> {
     Ok(())
 }
 
+
 fn cmd_workspace_update(root: &PathBuf, id: &str) -> Result<()> {
     let dest = dirs_home().join(".unai").join("workspaces").join(id);
     if !dest.exists() {
@@ -687,6 +726,7 @@ fn cmd_workspace_update(root: &PathBuf, id: &str) -> Result<()> {
     Ok(())
 }
 
+
 /// Рекурсивное копирование директории.
 fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> Result<()> {
     for entry in std::fs::read_dir(src).context("read package dir")? {
@@ -701,6 +741,7 @@ fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> Result<()> {
     }
     Ok(())
 }
+
 
 /// Путь к файлу состояния воркспейса: ~/.unai/workspaces/<id>/state.json
 /// (рядом с кодом установленного воркспейса — ADR-0003).
@@ -919,3 +960,4 @@ else:
 
     Ok(())
 }
+
