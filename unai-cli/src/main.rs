@@ -8,7 +8,10 @@ use std::path::PathBuf;
 #[command(name = "unai", version, about)]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
+    /// Start the MCP server over stdio (alias for `serve`; used by MCP clients)
+    #[arg(long)]
+    mcp: bool,
 }
 
 #[derive(Subcommand)]
@@ -139,13 +142,17 @@ fn main() -> Result<()> {
     let root = project_root();
 
     match cli.command {
-        Commands::Version => cmd_version(&root),
-        Commands::Doctor => cmd_doctor(&root),
-        Commands::Install { force } => cmd_install(&root, force),
-        Commands::Update { runtime_only } => cmd_update(&root, runtime_only),
-        Commands::Workspace { command } => cmd_workspace(&root, command),
-        Commands::Config { id } => cmd_config(&root, &id),
-        Commands::Serve => cmd_serve(&root),
+        Some(Commands::Version) => cmd_version(&root),
+        Some(Commands::Doctor) => cmd_doctor(&root),
+        Some(Commands::Install { force }) => cmd_install(&root, force),
+        Some(Commands::Update { runtime_only }) => cmd_update(&root, runtime_only),
+        Some(Commands::Workspace { command }) => cmd_workspace(&root, command),
+        Some(Commands::Config { id }) => cmd_config(&root, &id),
+        Some(Commands::Serve) => cmd_serve(&root),
+        None if cli.mcp => cmd_serve(&root),
+        None => anyhow::bail!(
+            "no command given — try `unai --help` (or `unai --mcp` to start the MCP server)"
+        ),
     }
 }
 
