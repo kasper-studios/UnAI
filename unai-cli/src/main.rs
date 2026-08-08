@@ -79,6 +79,11 @@ enum WorkspaceCmd {
         #[arg(value_name = "WS_ID")]
         id: String,
     },
+    /// Reset a workspace's session (forces login tools back; ADR-0004)
+    ResetSession {
+        #[arg(value_name = "WS_ID")]
+        id: String,
+    },
 }
 
 const VENV_DIR: &str = ".venv";
@@ -519,7 +524,40 @@ fn cmd_workspace(root: &PathBuf, cmd: WorkspaceCmd) -> Result<()> {
             std::fs::write(&state, "{\"enabled\": false}\n")?;
             println!("workspace '{id}' disabled (kept in registry)");
         }
+        WorkspaceCmd::ResetSession { id } => {
+            cmd_reset_session(root, &id)?;
+        }
     }
+    Ok(())
+}
+
+
+/// Remove a workspace's auth session data (ADR-0004).
+/// Deletes `~/.unai/data/<id>/session.json` (and any `tokens/` subdir) so that
+/// the next runtime load sees state `none` and `login`-tool reappears.
+fn cmd_reset_session(root: &PathBuf, id: &str) -> Result<()> {
+    let _ = root; // сессия живёт в ~/.unai/data, не в корне проекта
+    let data_dir = dirs_home().join(".unai").join("data").join(id);
+    let session_file = data_dir.join("session.json");
+
+    let mut removed_any = false;
+    if session_file.exists() {
+        std::fs::remove_file(&session_file)
+            .with_context(|| format!("remove session file {}", session_file.display()))?;
+        removed_any = true;
+        println!("  removed {}", session_file.display());
+    }
+    let tokens_dir = data_dir.join("tokens");
+    if tokens_dir.exists() {
+        std::fs::remove_dir_all(&tokens_dir)
+            .with_context(|| format!("remove tokens dir {}", tokens_dir.display()))?;
+        removed_any = true;
+        println!("  removed {}", tokens_dir.display());
+    }
+    if !removed_any {
+        println!("workspace '{id}' has no saved session (nothing to reset).");
+    }
+    println!("session reset: login tools for '{id}' will reappear on next runtime load (ADR-0004).");
     Ok(())
 }
 
