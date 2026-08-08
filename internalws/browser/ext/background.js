@@ -1,0 +1,292 @@
+// UnAI Browser Bridge — background service worker.
+// Держит единственное WebSocket-соединение с рантаймом UnAI (ws://127.0.0.1:8055),
+// маршрутизирует команды на активную вкладку (content script) и обратно.
+
+// devtools.js грузится как часть service worker (importScripts — работает
+// и в Chrome MV3, и в Firefox MV3).
+importScripts('devtools.js');
+
+const WS_URL = 'ws://127.0.0.1:8055';
+
+let ws = null;
+let wsConnected = false;
+let reconnectDelay = 2000;
+let reconnectTimer = null;
+let pending = new Map(); // reqId -> {resolve, reject}
+let reqCounter = 0;
+let lastReceivedPingAt = 0;
+
+// ---------------------------------------------------------------- WebSocket
+
+function connect() {
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+  try {
+    ws = new WebSocket(WS_URL);
+  } catch (e) {
+    scheduleReconnect();
+    return;
+  }
+
+  ws.onopen = () => {
+    wsConnected = true;
+    reconnectDelay = 2000;
+    console.log('[UnAI Bridge] connected to', WS_URL);
+    sendStatusNow();
+  };
+
+  ws.onmessage = async (ev) => {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch { return; }
+
+    if (msg.id && pending.has(msg.id)) {
+      const p = pending.get(msg.id);
+      pending.delete(msg.id);
+      if (msg.error) p.reject(new Error(msg.error)); else p.resolve(msg.result);
+      return;
+    }
+    if (msg.method) {
+      try {
+        const result = await dispatch(msg.method, msg.params || {}, msg.id);
+        if (msg.id) ws.send(JSON.stringify({ id: msg.id, result }));
+      } catch (err) {
+        if (msg.id) ws.send(JSON.stringify({ id: msg.id, error: err.message || String(err) }));
+      }
+    }
+  };
+
+  ws.onclose = () => {
+    wsConnected = false;
+    ws = null;
+    scheduleReconnect();
+  };
+  ws.onerror = () => { try { ws.close(); } catch {} };
+}
+
+function scheduleReconnect() {
+  clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(connect, reconnectDelay);
+  reconnectDelay = Math.min(reconnectDelay * 1.5, 15000);
+}
+
+function isConnected() { return wsConnected; }
+
+// ---------------------------------------------------------------- dispatch
+
+async function dispatch(method, params, reqId) {
+  switch (method) {
+    // ---- вкладки (только WebExtension)
+    case 'browser.tabs.list':
+      return listTabs();
+    case 'browser.tabs.activate':
+      return activateTab(params.id || params.index);
+    case 'browser.tabs.close':
+      return closeTab(params.id);
+
+    // ---- навигация / статус
+    case 'browser.navigate':
+      return navigate(params.url);
+    case 'browser.status':
+      return getStatus();
+
+    // ---- скриншот (native, через API браузера)
+    case 'browser.screenshot':
+      return screenshot();
+
+    // ---- куки (только WebExtension)
+    case 'browser.cookies.list':
+      return cookiesList(params);
+    case 'browser.cookies.get':
+      return cookiesGet(params);
+    case 'browser.cookies.set':
+      return cookiesSet(params);
+    case 'browser.cookies.remove':
+      return cookiesRemove(params);
+
+    // ---- DOM (через content script активной вкладки)
+    case 'dom.query':
+    case 'dom.click':
+    case 'dom.type':
+    case 'dom.wait':
+    case 'browser.storage.get':
+    case 'browser.storage.set':
+    case 'devtools.eval':
+    case 'devtools.console':
+      return sendToActiveTab(method, params);
+
+    // ---- DevTools: network — буфер в самом background
+    case 'devtools.network': {
+      const tab = await getActiveTab();
+      return self.unaiDevtools ? self.unaiDevtools.getNetworkLog(tab.id, params.limit || 100) : [];
+    }
+
+    default:
+      throw new Error(`Unknown method: ${method}`);
+  }
+}
+
+// ---------------------------------------------------------------- tabs
+
+async function getActiveTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab) throw new Error('No active tab');
+  return tab;
+}
+
+async function listTabs() {
+  const tabs = await chrome.tabs.query({});
+  return tabs.map(t => ({
+    id: t.id,
+    index: t.index,
+    title: t.title || '',
+    url: t.url || '',
+    active: t.active,
+    pinned: t.pinned,
+    windowId: t.windowId
+  }));
+}
+
+async function activateTab(idOrIndex) {
+  let tab;
+  if (typeof idOrIndex === 'number' && idOrIndex >= 0 && idOrIndex < 100000) {
+    tab = await getTabByIndex(idOrIndex);
+  } else {
+    tab = await chrome.tabs.get(idOrIndex);
+  }
+  if (!tab) throw new Error(`Tab not found: ${idOrIndex}`);
+  await chrome.tabs.update(tab.id, { active: true });
+  await chrome.windows.update(tab.windowId, { focused: true });
+  return { id: tab.id, index: tab.index, url: tab.url, title: tab.title };
+}
+
+async function getTabByIndex(index) {
+  const tabs = await chrome.tabs.query({ currentWindow: true });
+  const tab = tabs[index];
+  if (!tab) throw new Error(`No tab at index ${index}`);
+  return tab;
+}
+
+async function closeTab(id) {
+  await chrome.tabs.remove(id);
+  return { closed: id };
+}
+
+async function navigate(url) {
+  const tab = await getActiveTab();
+  await chrome.tabs.update(tab.id, { url });
+  return { navigated: url, tabId: tab.id };
+}
+
+async function getStatus() {
+  const tab = await getActiveTab();
+  return {
+    connected: wsConnected,
+    browser: getBrowserName(),
+    version: chrome.runtime.getManifest().version,
+    active_tab: {
+      id: tab.id,
+      title: tab.title || '',
+      url: tab.url || ''
+    }
+  };
+}
+
+function getBrowserName() {
+  const ua = navigator.userAgent;
+  if (ua.includes('Firefox')) return 'Firefox';
+  if (ua.includes('Chrome')) return 'Chrome';
+  if (ua.includes('Safari')) return 'Safari';
+  return 'Unknown Browser';
+}
+
+async function screenshot() {
+  const tab = await getActiveTab();
+  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+  return dataUrl.split(',')[1];
+}
+
+// ---------------------------------------------------------------- cookies
+
+async function cookiesList(params) {
+  return await chrome.cookies.getAll({ url: params.url, domain: params.domain, name: params.name });
+}
+
+async function cookiesGet(params) {
+  if (!params.url || !params.name) throw new Error('cookies.get requires url and name');
+  const c = await chrome.cookies.get({ url: params.url, name: params.name });
+  return c || null;
+}
+
+async function cookiesSet(params) {
+  if (!params.url || !params.name || params.value === undefined)
+    throw new Error('cookies.set requires url, name, value');
+  const cookie = await chrome.cookies.set({
+    url: params.url,
+    name: params.name,
+    value: String(params.value),
+    domain: params.domain,
+    path: params.path || '/',
+    secure: !!params.secure,
+    httpOnly: !!params.httpOnly,
+    expirationDate: params.expirationDate,
+    sameSite: params.sameSite
+  });
+  return cookie || null;
+}
+
+async function cookiesRemove(params) {
+  if (!params.url || !params.name) throw new Error('cookies.remove requires url and name');
+  await chrome.cookies.remove({ url: params.url, name: params.name });
+  return { removed: params.name };
+}
+
+// ---------------------------------------------------------------- content script bridge
+
+async function sendToActiveTab(method, params) {
+  const tab = await getActiveTab();
+  let resp;
+  try {
+    resp = await chrome.tabs.sendMessage(tab.id, { method, params });
+  } catch (e) {
+    throw new Error(`${method}: content script unavailable (${e.message})`);
+  }
+  if (resp && resp.error) throw new Error(resp.error);
+  return resp && resp.result;
+}
+
+// ---------------------------------------------------------------- popup
+
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg && msg.method === 'popup.status') {
+    getStatus().then(s => sendResponse({ status: s })).catch((e) => sendResponse({ status: { connected: wsConnected, error: e.message } }));
+    return true; // асинхронный ответ
+  }
+});
+
+// ---------------------------------------------------------------- events
+
+async function sendStatusNow() {
+  if (!wsConnected) return;
+  try {
+    const status = await getStatus();
+    ws.send(JSON.stringify({ type: 'status', status }));
+  } catch (e) { /* no active tab yet */ }
+}
+
+chrome.tabs.onActivated.addListener(() => sendStatusNow());
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
+  if (changeInfo.status === 'complete') sendStatusNow();
+});
+chrome.windows.onFocusChanged.addListener(() => sendStatusNow());
+
+// ---------------------------------------------------------------- keepalive
+
+chrome.alarms.create('unai-ping', { periodInMinutes: 1 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'unai-ping' && wsConnected) {
+    try { ws.send(JSON.stringify({ type: 'ping' })); } catch {}
+  }
+});
+
+connect();
+chrome.runtime.onStartup.addListener(connect);
+chrome.runtime.onInstalled.addListener(connect);

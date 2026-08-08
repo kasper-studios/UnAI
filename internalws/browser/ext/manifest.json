@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "UnAI Browser Bridge",
+  "version": "1.0.0",
+  "description": "Bridge between the UnAI runtime and this browser over WebSocket (ws://127.0.0.1:8055). The user grants this browser to the agent.",
+  "permissions": [
+    "tabs",
+    "activeTab",
+    "storage",
+    "cookies",
+    "scripting",
+    "alarms",
+    "webRequest"
+  ],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "UnAI Bridge"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

@@ -30,11 +30,12 @@
 - [ ] Бутстрап: `uvx unai …` / `python -m unai install` (часть 3).
 - [ ] Расширение: `update`, `self-update`, `repair`, `backup/restore`, `extension status`.
 
-## Phase 4 — Workspace SDK + Browser (built-in)
+## Phase 4 — Workspace SDK + Browser (built-in) ✅
 Цель: контракт воркспейса и единственный встроенный воркспейс.
-- [ ] Workspace SDK: контракт, чей манифест + фичи + `emit`-подписка.
-- [ ] Web Workspace (built-in browser): `dom.query`, `dom.click`, `dom.type`, `dom.wait`, MutationObserver, смена URL.
-- [ ] Firefox (основной) и Chrome (песочница); расширение рапортует, из какого браузера какает.
+- [x] Workspace SDK: контракт, `@tool` декораторы, манифест + фичи.
+- [x] Web Workspace (built-in browser): WebSocket-мост, `dom.query`, `dom.click`, `dom.type`, `dom.wait`, `browser.screenshot`.
+- [x] Browser Bridge: Tampermonkey юзерскрипт (`internalws/browser/bridge.user.js`).
+- [ ] Firefox (основной) и Chrome (песочница); расширение: юзер выбирает ОДИН браузер (сменить можно, но не два сразу)
 
 ## Phase 5 — Marketplace (`wsmarketplace/`)
 Цель: каталог доступных воркспейсов внутри репо, CLI читает его при `install`.

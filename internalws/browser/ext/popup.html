@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { width: 260px; font-family: system-ui, sans-serif; margin: 0; padding: 12px; }
+    h1 { font-size: 13px; margin: 0 0 10px; }
+    #status { font-size: 12px; padding: 8px; border-radius: 6px; margin-bottom: 10px; }
+    .ok { background: #e6f7e6; color: #1a7f1a; }
+    .bad { background: #fdecec; color: #b00020; }
+    .row { font-size: 11px; color: #444; margin: 3px 0; }
+    .url { color: #888; word-break: break-all; }
+    button { width: 100%; padding: 6px; font-size: 12px; border: 1px solid #ccc; border-radius: 6px; background: #f8f8f8; cursor: pointer; }
+    button:hover { background: #eee; }
+  </style>
+</head>
+<body>
+  <h1>🔗 UnAI Browser Bridge</h1>
+  <div id="status" class="bad">connecting…</div>
+  <div class="row" id="browser"></div>
+  <div class="row" id="tab-title"></div>
+  <div class="row url" id="tab-url"></div>
+  <button id="refresh" style="margin-top:8px;">Refresh</button>
+  <script src="popup.js"></script>
+</body>
+</html>
