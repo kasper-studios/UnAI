@@ -294,75 +294,134 @@ fn cmd_update(_root: &PathBuf, runtime_only: bool) -> Result<()> {
         println!("Checking for CLI binary updates...");
         let current_exe = std::env::current_exe().context("cannot determine current binary path")?;
         
-        // Try to fetch latest release from GitHub
+        // Try to fetch latest release from GitHub.
+        // Не используем api.github.com (анонимный rate-limit 60/ч -> 403).
+        // Идём через HTTPS-редирект https://github.com/<repo>/releases/latest
+        // -> .../releases/tag/<tag> (без лимитов, надёжно).
         let repo = "kasper-studios/UnAI";
-        let url = format!("https://api.github.com/repos/{}/releases/latest", repo);
-        
-        match reqwest::blocking::get(&url) {
-            Ok(resp) if resp.status().is_success() => {
-                let json: serde_json::Value = resp.json()?;
-                let tag = json["tag_name"].as_str().unwrap_or("unknown");
-                println!("  Latest release: {}", tag);
-                
-                // Detect platform
-                let os = std::env::consts::OS;
-                let arch = std::env::consts::ARCH;
-                let target = match (os, arch) {
-                    ("linux", "x86_64") => "x86_64-unknown-linux-musl",
-                    ("linux", "aarch64") => "aarch64-unknown-linux-musl",
-                    ("macos", "x86_64") => "x86_64-apple-darwin",
-                    ("macos", "aarch64") => "aarch64-apple-darwin",
-                    _ => {
-                        println!("  ⚠ Pre-built binary not available for {}-{}", os, arch);
-                        println!("  Skipping CLI update (use source build manually if needed)");
-                        return update_python_runtime();
-                    }
-                };
-                
+        let redirect_url = format!("https://github.com/{repo}/releases/latest");
+        let tag = match reqwest::blocking::Client::new()
+            .get(&redirect_url)
+            .header(reqwest::header::USER_AGENT, "unai-cli/update")
+            .send()
+        {
+            Ok(resp) => {
+                let final_url = resp.url().to_string();
+                // final_url = https://github.com/<repo>/releases/tag/<tag>
+                final_url
+                    .rsplit('/')
+                    .next()
+                    .map(|s| s.to_string())
+                    .filter(|t| !t.is_empty() && t != "latest")
+            }
+            Err(e) => {
+                println!("  ⚠ Failed to check for updates: {e}");
+                println!("  Skipping CLI update");
+                return update_python_runtime();
+            }
+        };
+
+        if let Some(tag) = tag {
+            println!("  Latest release: {tag}");
+
+            // Detect platform
+            let os = std::env::consts::OS;
+            let arch = std::env::consts::ARCH;
+            let (targets, gnu_fallback) = match (os, arch) {
+                ("linux", "x86_64") => (["x86_64-unknown-linux-musl"], true),
+                ("linux", "aarch64") => (["aarch64-unknown-linux-musl"], true),
+                ("macos", "x86_64") => (["x86_64-apple-darwin"], false),
+                ("macos", "aarch64") => (["aarch64-apple-darwin"], false),
+                _ => {
+                    println!("  ⚠ Pre-built binary not available for {os}-{arch}");
+                    println!("  Skipping CLI update (use source build manually if needed)");
+                    return update_python_runtime();
+                }
+            };
+            // musl обычно недоступен для system-rustc-сборок — fallback на gnu.
+            let gnu_target: Option<&str> = if gnu_fallback && os == "linux" {
+                match arch {
+                    "x86_64" => Some("x86_64-unknown-linux-gnu"),
+                    "aarch64" => Some("aarch64-unknown-linux-gnu"),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+
+            let mut downloaded = false;
+            let mut attempts: Vec<&str> = Vec::new();
+            attempts.push(targets[0]);
+            if let Some(g) = gnu_target {
+                attempts.push(g);
+            }
+            for t in attempts {
                 let download_url = format!(
-                    "https://github.com/{}/releases/download/{}/unai-{}",
-                    repo, tag, target
+                    "https://github.com/{repo}/releases/download/{tag}/unai-{t}"
                 );
-                
-                println!("  Downloading {}...", download_url);
-                match reqwest::blocking::get(&download_url) {
+                println!("  Downloading {download_url}...");
+                match reqwest::blocking::Client::new()
+                    .get(&download_url)
+                    .header(reqwest::header::USER_AGENT, "unai-cli/update")
+                    .send()
+                {
                     Ok(resp) if resp.status().is_success() => {
-                        let bytes = resp.bytes()?;
-                        
+                        let bytes = match resp.bytes() {
+                            Ok(b) => b,
+                            Err(e) => {
+                                println!("  ⚠ Download failed (read): {e}");
+                                continue;
+                            }
+                        };
+
                         // Write to temp file, then replace current binary
                         let temp_path = current_exe.with_extension("new");
-                        std::fs::write(&temp_path, &bytes)?;
-                        
+                        if let Err(e) = std::fs::write(&temp_path, &bytes) {
+                            println!("  ⚠ Write failed: {e}");
+                            continue;
+                        }
+
                         #[cfg(unix)]
                         {
                             use std::os::unix::fs::PermissionsExt;
-                            let mut perms = std::fs::metadata(&temp_path)?.permissions();
+                            let mut perms = match std::fs::metadata(&temp_path) {
+                                Ok(m) => m.permissions(),
+                                Err(e) => {
+                                    println!("  ⚠ chmod metadata failed: {e}");
+                                    continue;
+                                }
+                            };
                             perms.set_mode(0o755);
-                            std::fs::set_permissions(&temp_path, perms)?;
+                            if let Err(e) = std::fs::set_permissions(&temp_path, perms) {
+                                println!("  ⚠ chmod failed: {e}");
+                                continue;
+                            }
                         }
-                        
+
                         // Atomic replace
-                        std::fs::rename(&temp_path, &current_exe)?;
-                        println!("  ✓ CLI binary updated to {}", tag);
+                        match std::fs::rename(&temp_path, &current_exe) {
+                            Ok(_) => {
+                                println!("  ✓ CLI binary updated to {tag} (unai-{t})");
+                                downloaded = true;
+                            }
+                            Err(e) => println!("  ⚠ rename failed: {e}"),
+                        }
+                        break;
                     }
                     Ok(resp) => {
-                        println!("  ⚠ Binary not found for this platform ({})", resp.status());
-                        println!("  Skipping CLI update");
+                        println!("  ⚠ Binary not found for {t} ({})", resp.status());
                     }
                     Err(e) => {
-                        println!("  ⚠ Download failed: {}", e);
-                        println!("  Skipping CLI update");
+                        println!("  ⚠ Download failed: {e}");
                     }
                 }
             }
-            Ok(resp) => {
-                println!("  ⚠ No releases found ({})", resp.status());
+            if !downloaded {
                 println!("  Skipping CLI update");
             }
-            Err(e) => {
-                println!("  ⚠ Failed to check for updates: {}", e);
-                println!("  Skipping CLI update");
-            }
+        } else {
+            println!("  ⚠ No releases found");
+            println!("  Skipping CLI update");
         }
         println!();
     }

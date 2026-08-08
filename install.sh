@@ -28,9 +28,14 @@ esac
 TARGET="${ARCH}-${OS}"
 echo "Detected platform: $TARGET"
 
-# Try to fetch latest release binary
+# Try to fetch latest release binary.
+# Без api.github.com (анонимный rate-limit 60/ч -> 403): идём через
+# HTTPS-редирект https://github.com/<repo>/releases/latest -> /releases/tag/<tag>.
 echo "Checking for pre-built binary..."
-LATEST_RELEASE=$(curl -sSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/' || echo "")
+LATEST_RELEASE=$(curl -sIL -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest" | sed -E 's#.*/releases/tag/([^/?]+).*#\1#' || echo "")
+if [ "$LATEST_RELEASE" = "https://github.com/${REPO}/releases/latest" ]; then
+    LATEST_RELEASE=""
+fi
 
 if [ -n "$LATEST_RELEASE" ]; then
     DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${LATEST_RELEASE}/${BINARY_NAME}-${TARGET}"
