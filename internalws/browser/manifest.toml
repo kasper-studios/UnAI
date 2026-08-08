@@ -1,0 +1,8 @@
+id = "browser"
+name = "Web Browser"
+version = "1.0.0"
+entry = "run.py"
+api = 1
+author = "kasper studios"
+description = "Built-in browser workspace powered by KasperBridge WebExtension"
+default_enabled = true
