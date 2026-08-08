@@ -20,8 +20,8 @@ case "$ARCH" in
 esac
 
 case "$OS" in
-    linux) OS="unknown-linux-musl" ;;
-    darwin) OS="apple-darwin" ;;
+    linux) OS="unknown-linux-musl" ; OS_FALLBACK="unknown-linux-gnu" ;;
+    darwin) OS="apple-darwin" ; OS_FALLBACK="" ;;
     *) echo "Unsupported OS: $OS"; exit 1 ;;
 esac
 
@@ -35,14 +35,26 @@ LATEST_RELEASE=$(curl -sSL "https://api.github.com/repos/${REPO}/releases/latest
 if [ -n "$LATEST_RELEASE" ]; then
     DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${LATEST_RELEASE}/${BINARY_NAME}-${TARGET}"
     echo "Found release ${LATEST_RELEASE}, downloading binary..."
-    
+
     mkdir -p "$INSTALL_DIR"
-    if curl -fsSL "$DOWNLOAD_URL" -o "${INSTALL_DIR}/${BINARY_NAME}"; then
+    if ! curl -fsSL "$DOWNLOAD_URL" -o "${INSTALL_DIR}/${BINARY_NAME}"; then
+        # musl-бинрарь не вышел — пробуем gnu fallback (только linux, без падения в source build)
+        if [ -n "$OS_FALLBACK" ]; then
+            FALLBACK_URL="https://github.com/${REPO}/releases/download/${LATEST_RELEASE}/${BINARY_NAME}-${ARCH}-${OS_FALLBACK}"
+            echo "⚠ musl binary not available, trying fallback: ${OS_FALLBACK}"
+            if curl -fsSL "$FALLBACK_URL" -o "${INSTALL_DIR}/${BINARY_NAME}"; then
+                chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
+                echo "✓ Binary installed to ${INSTALL_DIR}/${BINARY_NAME}"
+                LATEST_RELEASE_DONE=1
+            fi
+        fi
+        if [ -z "${LATEST_RELEASE_DONE:-}" ]; then
+            echo "⚠ Pre-built binary not available for $TARGET, will build from source..."
+            LATEST_RELEASE=""
+        fi
+    else
         chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
         echo "✓ Binary installed to ${INSTALL_DIR}/${BINARY_NAME}"
-    else
-        echo "⚠ Pre-built binary not available for $TARGET, will build from source..."
-        LATEST_RELEASE=""
     fi
 fi
 
