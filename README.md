@@ -67,6 +67,31 @@ A workspace (web, Discord, Telegram, vault, python…) publishes its API — not
 > **CLI:** `unai` is a Rust binary (`docs/adr/0001-unai-cli.md`, in `unai-cli/`) — install, doctor,
 > update and workspace management as a thin infra tool over the Python runtime.
 
+---
+
+## Install
+
+One command, no Rust or Python toolchain needed (pre-built binary from GitHub Releases):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kasper-studios/UnAI/main/install.sh | bash
+```
+
+Installs the `unai` CLI to `~/.local/bin/` (make sure it's on your `PATH`), then:
+
+```bash
+unai --version                    # verify
+unai doctor                      # check the environment
+unai workspace install example   # install the example workspace
+unai workspace enable example    # make its tools available
+unai serve                       # start the MCP server (stdio)
+```
+
+No pre-built binary for your platform yet? The installer falls back to building from
+source (requires a Rust toolchain in that case).
+
+---
+
 ## Status
 
 - [x] Workspace registration + manifest (with optional `features`)
