@@ -36,6 +36,7 @@
 - [x] Web Workspace (built-in browser): WebSocket-мост, `dom.query`, `dom.click`, `dom.type`, `dom.wait`, `browser.screenshot`.
 - [x] Browser Bridge: Tampermonkey юзерскрипт (`internalws/browser/bridge.user.js`).
 - [ ] Firefox (основной) и Chrome (песочница); расширение: юзер выбирает ОДИН браузер (сменить можно, но не два сразу)
+- [x] **ADR-0004**: одноразовые login-тулзы (state-зависимые), `unai workspace reset-session` для принудительного возврата login; авто-перенос кук/токенов между воркспейсами НЕ делается — агент сам решает.
 
 ## Phase 5 — Marketplace (`wsmarketplace/`)
 Цель: каталог доступных воркспейсов внутри репо, CLI читает его при `install`.

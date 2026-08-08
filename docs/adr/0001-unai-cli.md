@@ -67,7 +67,14 @@ unai extension status           # per-browser extension connection state
 - **Not the runtime.** The CLI never runs the System Bus or hosts workspaces — it orchestrates/installs/configures them.
 - **Not a replacement for Python.** Rust is chosen only for the CLI; the runtime and workspaces stay in Python (their integration surface: Discord bot, Kdenlive, MCP ecosystem).
 - **Language choice never constrains the Runtime.** The CLI ↔ runtime contract is external and language-independent.
-- **Not a mandatory TUI.** A full TUI (ratatui) is an optional later layer on the same Rust crate; the CLI stays scriptable.
+| **Not a mandatory TUI.** A full TUI (ratatui) is an optional later layer on the same Rust crate; the CLI stays scriptable.
+
+## 5. Session & auth commands (ADR-0004)
+- `unai workspace reset-session <ws_id>` — принудительный сброс сессии: удаляет
+  `~/.unai/data/<id>/session.json`, состояние → `none`, `login`-тулза воркспейса
+  снова доступна агенту. Доступно вне зависимости от текущего state.
+- `unai workspace ls` показывает статус сессии (`none` / `valid` / `invalid`)
+  — не для авто-действий, а как индикатор для юзера.
 
 ## 4. Открытые вопросы (Open Questions)
 1. ~~Separate repo vs alongside `src/unai`?~~ → **Решение: моно-репо**, `unai-cli/` рядом с `src/` (2026-08-03). Упрощает бутстрип (`CARGO_MANIFEST_DIR ·/.` = корень, прямой доступ к `pyproject.toml` и `src/unai`), не мешая независимой дистрибуции бинарника.
