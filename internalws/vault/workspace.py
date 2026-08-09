@@ -101,7 +101,14 @@ class VaultWorkspace(Workspace):
             "name": {"type": "string", "description": "Secret key name"}
         }
     )
-    async def secret_get(self, name: str, **kwargs: Any) -> Optional[str]:
+    @tool(
+        "vault.secret.get",
+        description="Get a raw secret, API key, or token by name (e.g. 'openai_api_key', 'stripe_key')",
+        arguments={
+            "name": {"type": "string", "description": "Secret key name"}
+        }
+    )
+    async def secret_get(self, name: str, reason: Optional[str] = None) -> Optional[str]:
         data = self._load_data()
         return data.get("secrets", {}).get(name)
 
@@ -113,7 +120,7 @@ class VaultWorkspace(Workspace):
             "value": {"type": "string", "description": "Secret value"}
         }
     )
-    async def secret_set(self, name: str, value: str, **kwargs: Any) -> str:
+    async def secret_set(self, name: str, value: str, reason: Optional[str] = None) -> str:
         data = self._load_data()
         if "secrets" not in data:
             data["secrets"] = {}
@@ -132,7 +139,7 @@ class VaultWorkspace(Workspace):
             "service": {"type": "string", "description": "Service name (e.g. 'google', 'github')"}
         }
     )
-    async def credentials_get(self, service: str, **kwargs: Any) -> Optional[Dict[str, Any]]:
+    async def credentials_get(self, service: str, reason: Optional[str] = None) -> Optional[Dict[str, Any]]:
         data = self._load_data()
         creds = data.get("credentials", {}).get(service)
         if not creds:
@@ -153,7 +160,7 @@ class VaultWorkspace(Workspace):
             "totp": {"type": "string", "description": "TOTP 2FA Secret Key (base32)", "default": ""}
         }
     )
-    async def credentials_set(self, service: str, username: str = "", password: str = "", totp: str = "", **kwargs: Any) -> str:
+    async def credentials_set(self, service: str, username: str = "", password: str = "", totp: str = "", reason: Optional[str] = None) -> str:
         data = self._load_data()
         if "credentials" not in data:
             data["credentials"] = {}
@@ -189,7 +196,7 @@ class VaultWorkspace(Workspace):
         password: str = "",
         totp: str = "",
         secret_value: str = "",
-        **kwargs: Any
+        reason: Optional[str] = None
     ) -> str:
         data = self._load_data()
         updated = False
@@ -223,7 +230,7 @@ class VaultWorkspace(Workspace):
             "service": {"type": "string", "description": "Service name or secret key name"}
         }
     )
-    async def totp_code(self, service: str, **kwargs: Any) -> str:
+    async def totp_code(self, service: str, reason: Optional[str] = None) -> str:
         data = self._load_data()
         totp_secret = None
         
@@ -253,7 +260,7 @@ class VaultWorkspace(Workspace):
         "vault.list",
         description="List all stored keys and services in vault (with masked values)"
     )
-    async def list_vault(self, **kwargs: Any) -> Dict[str, Any]:
+    async def list_vault(self, reason: Optional[str] = None) -> Dict[str, Any]:
         data = self._load_data()
         secrets_list = []
         for k in data.get("secrets", {}).keys():
@@ -283,7 +290,7 @@ class VaultWorkspace(Workspace):
             "name": {"type": "string", "description": "Key or service name to delete"}
         }
     )
-    async def remove_entry(self, name: str, **kwargs: Any) -> str:
+    async def remove_entry(self, name: str, reason: Optional[str] = None) -> str:
         data = self._load_data()
         removed = False
         if name in data.get("secrets", {}):
