@@ -560,6 +560,11 @@ fn update_python_runtime() -> Result<()> {
     
     if src_dir.exists() {
         println!("  Pulling latest changes from GitHub...");
+        let _ = run(
+            std::process::Command::new("git")
+                .args(["reset", "--hard"])
+                .current_dir(&src_dir)
+        );
         let out = run(
             std::process::Command::new("git")
                 .args(["pull", "origin", "main"])

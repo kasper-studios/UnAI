@@ -41,6 +41,9 @@ def _find_runtime_dir() -> Path:
     return prod  # will fail gracefully later
 
 
+ACTIVE_WORKSPACES: List[Any] = []
+
+
 def _register_workspace_tools(ws_id: str, ws_path: Path) -> None:
     """Load workspace.py from ws_path, find Workspace subclasses, register their @tool methods."""
     ws_py = ws_path / "workspace.py"
@@ -59,6 +62,7 @@ def _register_workspace_tools(ws_id: str, ws_path: Path) -> None:
                 attr = getattr(mod, attr_name)
                 if isinstance(attr, type) and hasattr(attr, "_tools") and attr._tools:
                     instance = attr(runtime_id=ws_id)
+                    ACTIVE_WORKSPACES.append(instance)
                     for tool_name, tool_spec in instance.tools.items():
                         fn = tool_spec.bound or tool_spec.handler
                         if fn:
@@ -137,10 +141,19 @@ def load_enabled_workspaces() -> None:
         _register_workspace_tools(ws_id, ws_path)
 
 
-def main() -> None:
+async def async_main() -> None:
     load_internal_workspaces()
     load_enabled_workspaces()
-    mcp.run(transport="stdio")
+    for ws in ACTIVE_WORKSPACES:
+        try:
+            await ws.start()
+        except Exception as e:
+            print(f"Error starting workspace {getattr(ws, 'runtime_id', 'unknown')}: {e}", file=sys.stderr)
+    await mcp.run_stdio_async()
+
+
+def main() -> None:
+    asyncio.run(async_main())
 
 
 if __name__ == "__main__":
