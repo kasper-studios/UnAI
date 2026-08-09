@@ -65,10 +65,49 @@ function connect() {
 function scheduleReconnect() {
   clearTimeout(reconnectTimer);
   reconnectTimer = setTimeout(connect, reconnectDelay);
-  reconnectDelay = Math.min(reconnectDelay * 1.5, 15000);
+  reconnectDelay = Math.min(reconnectDelay * 1.2, 5000);
 }
 
 function isConnected() { return wsConnected; }
+
+// ---------------------------------------------------------------- keepalive & auto-connect
+
+// 15s interval while service worker is active
+setInterval(() => {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    connect();
+  } else {
+    try { ws.send(JSON.stringify({ type: 'ping' })); } catch {}
+  }
+}, 15000);
+
+// Chrome Alarm every 0.35 min (~21s) to prevent MV3 Service Worker 30s idle termination
+chrome.alarms.create('unai-ping', { periodInMinutes: 0.35 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'unai-ping') {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      connect();
+    } else {
+      try {
+        ws.send(JSON.stringify({ type: 'ping' }));
+        sendStatusNow();
+      } catch {
+        connect();
+      }
+    }
+  }
+});
+
+// Auto reconnect on user tab/window interactions
+chrome.tabs.onActivated.addListener(() => { connect(); sendStatusNow(); });
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
+  if (changeInfo.status === 'complete') { connect(); sendStatusNow(); }
+});
+chrome.windows.onFocusChanged.addListener(() => { connect(); sendStatusNow(); });
+
+connect();
+chrome.runtime.onStartup.addListener(connect);
+chrome.runtime.onInstalled.addListener(connect);
 
 // ---------------------------------------------------------------- dispatch
 
@@ -386,22 +425,3 @@ async function sendStatusNow() {
     ws.send(JSON.stringify({ type: 'status', status }));
   } catch (e) { /* no active tab yet */ }
 }
-
-chrome.tabs.onActivated.addListener(() => sendStatusNow());
-chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
-  if (changeInfo.status === 'complete') sendStatusNow();
-});
-chrome.windows.onFocusChanged.addListener(() => sendStatusNow());
-
-// ---------------------------------------------------------------- keepalive
-
-chrome.alarms.create('unai-ping', { periodInMinutes: 1 });
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'unai-ping' && wsConnected) {
-    try { ws.send(JSON.stringify({ type: 'ping' })); } catch {}
-  }
-});
-
-connect();
-chrome.runtime.onStartup.addListener(connect);
-chrome.runtime.onInstalled.addListener(connect);
