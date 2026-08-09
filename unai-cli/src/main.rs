@@ -868,6 +868,11 @@ fn update_python_runtime() -> Result<()> {
                 .args(["reset", "--hard"])
                 .current_dir(&src_dir)
         );
+        let _ = run(
+            std::process::Command::new("git")
+                .args(["clean", "-fd"])
+                .current_dir(&src_dir)
+        );
         let out = run(
             std::process::Command::new("git")
                 .args(["pull", "origin", "main"])
