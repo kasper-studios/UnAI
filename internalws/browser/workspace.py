@@ -3,6 +3,7 @@ import asyncio
 import base64
 import json
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 import websockets
 from unai.sdk import Workspace, tool
@@ -18,6 +19,12 @@ SETTINGS_SCHEMA = SettingsSchema(
             description="Browser designated for agent sandbox",
             choices=["Firefox", "Chrome / Chromium", "Brave", "Edge", "Custom"],
             default="Firefox",
+        ),
+        "custom_browser_cmd": SettingItem(
+            type="text",
+            title="Custom Browser Binary / Command",
+            description="Executable command or path for Custom browser (e.g. google-chrome-stable or /usr/bin/firefox)",
+            default="",
         ),
         "bridge_type": SettingItem(
             type="choice",
@@ -277,9 +284,57 @@ class BrowserWorkspace(Workspace):
             "info": "Browser successfully provided by the user. Connection active."
         }
 
+    def _get_settings(self) -> Dict[str, Any]:
+        """Load browser workspace settings from ~/.unai/workspaces/browser/settings.json or data dir."""
+        paths = [
+            Path.home() / ".unai" / "workspaces" / "browser" / "settings.json",
+            Path.home() / ".unai" / "data" / "browser" / "settings.json",
+        ]
+        for p in paths:
+            if p.exists():
+                try:
+                    return json.loads(p.read_text())
+                except Exception:
+                    pass
+        return {}
+
+    def _resolve_browser_cmd(self) -> tuple[str, List[str]]:
+        """Resolve executable command and binary name based on configured settings."""
+        settings = self._get_settings()
+        btype = settings.get("browser_type", "Firefox")
+        custom_cmd = settings.get("custom_browser_cmd", "").strip()
+
+        if btype == "Custom" and custom_cmd:
+            import shutil
+            parts = custom_cmd.split()
+            bin_path = shutil.which(parts[0]) or parts[0]
+            return custom_cmd, [bin_path] + parts[1:]
+
+        import shutil
+        browser_candidates = {
+            "Firefox": ["firefox", "firefox-developer-edition", "firefox-esr"],
+            "Chrome / Chromium": ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome"],
+            "Brave": ["brave", "brave-browser"],
+            "Edge": ["microsoft-edge", "microsoft-edge-stable", "msedge"],
+        }
+
+        candidates = browser_candidates.get(btype, ["firefox", "google-chrome", "chromium"])
+        for cmd in candidates:
+            resolved = shutil.which(cmd)
+            if resolved:
+                return f"{btype} ({cmd})", [resolved]
+
+        for name, cmds in browser_candidates.items():
+            for cmd in cmds:
+                resolved = shutil.which(cmd)
+                if resolved:
+                    return f"{name} ({cmd})", [resolved]
+
+        return "Default Browser", []
+
     @tool(
         "browser.open",
-        description="Open a URL in the browser. If bridge is not connected, attempts to open the system default browser.",
+        description="Open a URL in the browser. If bridge is not connected, launches configured browser profile from settings and waits for connection.",
         arguments={
             "url": {"type": "string", "description": "URL to open", "default": "about:blank"}
         }
@@ -287,14 +342,28 @@ class BrowserWorkspace(Workspace):
     async def open_browser(self, url: str = "about:blank", reason: Optional[str] = None) -> str:
         await self._ensure_server_started()
         if not self._active_websocket:
+            browser_name, cmd_args = self._resolve_browser_cmd()
+            import subprocess
             import webbrowser
-            try:
-                webbrowser.open(url)
-            except Exception as e:
-                return f"Failed to launch system browser: {e}. Please start your browser manually."
 
-            # Wait up to 5 seconds for the extension/userscript to auto-connect to ws://127.0.0.1:8055
-            for _ in range(50):
+            launched = False
+            if cmd_args:
+                try:
+                    subprocess.Popen(cmd_args + [url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    launched = True
+                except Exception as e:
+                    print(f"[BrowserWorkspace] Direct launch of {cmd_args} failed: {e}")
+
+            if not launched:
+                try:
+                    webbrowser.open(url)
+                    browser_name = "system default browser"
+                    launched = True
+                except Exception as e:
+                    return f"Failed to launch browser: {e}. Please start your browser manually."
+
+            # Wait up to 8 seconds for the extension/userscript to auto-connect to ws://127.0.0.1:8055
+            for _ in range(80):
                 if self._active_websocket:
                     break
                 await asyncio.sleep(0.1)
@@ -304,8 +373,8 @@ class BrowserWorkspace(Workspace):
             return f"Successfully opened URL in browser: {url}"
         else:
             return (
-                f"Opened system browser at {url}, but KasperBridge extension did not connect within 5s. "
-                "Please make sure the UnAI Bridge extension is active."
+                f"Launched {browser_name} at {url}, but KasperBridge extension did not connect within 8s. "
+                "Please make sure the UnAI Bridge extension/userscript is active."
             )
 
     @tool(
