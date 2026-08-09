@@ -2,8 +2,35 @@ import asyncio
 import base64
 import json
 from typing import Any, Dict, List, Optional
-import websockets
 from unai.sdk import Workspace, tool
+from unai.common.protocol import SettingsSchema, SettingItem
+
+SETTINGS_SCHEMA = SettingsSchema(
+    title="Web Browser Sandbox Settings",
+    description="Configure designated browser profile and KasperBridge settings",
+    items={
+        "browser_type": SettingItem(
+            type="choice",
+            title="Target Browser Profile",
+            description="Browser designated for agent sandbox",
+            choices=["Firefox", "Chrome / Chromium", "Brave", "Edge", "Custom"],
+            default="Firefox",
+        ),
+        "bridge_type": SettingItem(
+            type="choice",
+            title="KasperBridge Extension Type",
+            description="WebExtension (Background Service Worker) or Tampermonkey Userscript",
+            choices=["WebExtension (Firefox / Chrome)", "Tampermonkey Userscript"],
+            default="WebExtension (Firefox / Chrome)",
+        ),
+        "bridge_port": SettingItem(
+            type="text",
+            title="WebSocket Bridge Port",
+            description="Port for KasperBridge auto-connection",
+            default="8055",
+        ),
+    },
+)
 
 class BrowserWorkspace(Workspace):
     """

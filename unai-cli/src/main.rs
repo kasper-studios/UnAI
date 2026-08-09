@@ -1171,7 +1171,9 @@ spec = importlib.util.spec_from_file_location("ws_module", '{}')
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 
-schema = getattr(m, 'EXAMPLE_SETTINGS_SCHEMA', None)
+schema = getattr(m, 'SETTINGS_SCHEMA', None)
+if schema is None:
+    schema = getattr(m, 'EXAMPLE_SETTINGS_SCHEMA', None)
 if schema is None:
     for attr in dir(m):
         obj = getattr(m, attr)
