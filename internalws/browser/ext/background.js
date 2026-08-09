@@ -257,7 +257,20 @@ async function sendToActiveTab(method, params) {
   try {
     resp = await chrome.tabs.sendMessage(tab.id, { method, params });
   } catch (e) {
-    throw new Error(`${method}: content script unavailable (${e.message})`);
+    if (e.message && e.message.includes('Receiving end does not exist')) {
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ['content.js']
+        });
+        await new Promise(r => setTimeout(r, 150));
+        resp = await chrome.tabs.sendMessage(tab.id, { method, params });
+      } catch (injectErr) {
+        throw new Error(`${method}: content script unavailable (${e.message})`);
+      }
+    } else {
+      throw new Error(`${method}: content script unavailable (${e.message})`);
+    }
   }
   if (resp && resp.error) throw new Error(resp.error);
   return resp && resp.result;
