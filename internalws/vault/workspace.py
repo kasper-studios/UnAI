@@ -157,13 +157,63 @@ class VaultWorkspace(Workspace):
         data = self._load_data()
         if "credentials" not in data:
             data["credentials"] = {}
+
+        existing = data["credentials"].get(service, {})
+        new_username = username if username != "" else existing.get("username", "")
+        new_password = password if password != "" else existing.get("password", "")
+        new_totp = totp.strip().replace(" ", "").upper() if totp != "" else existing.get("totp", "")
+
         data["credentials"][service] = {
-            "username": username,
-            "password": password,
-            "totp": totp.strip().replace(" ", "").upper()
+            "username": new_username,
+            "password": new_password,
+            "totp": new_totp
         }
         self._save_data(data)
         return f"Successfully saved credentials for service '{service}' to vault"
+
+    @tool(
+        "vault.edit",
+        description="Partially edit specific fields of an existing credential or secret without wiping unspecified fields",
+        arguments={
+            "name": {"type": "string", "description": "Key or service name"},
+            "username": {"type": "string", "description": "New username (optional)", "default": ""},
+            "password": {"type": "string", "description": "New password (optional)", "default": ""},
+            "totp": {"type": "string", "description": "New TOTP 2FA secret (optional)", "default": ""},
+            "secret_value": {"type": "string", "description": "New raw secret value (optional)", "default": ""}
+        }
+    )
+    async def edit_entry(
+        self,
+        name: str,
+        username: str = "",
+        password: str = "",
+        totp: str = "",
+        secret_value: str = ""
+    ) -> str:
+        data = self._load_data()
+        updated = False
+
+        if secret_value != "":
+            if "secrets" not in data:
+                data["secrets"] = {}
+            data["secrets"][name] = secret_value
+            updated = True
+
+        if username != "" or password != "" or totp != "" or name in data.get("credentials", {}):
+            if "credentials" not in data:
+                data["credentials"] = {}
+            existing = data["credentials"].get(name, {})
+            data["credentials"][name] = {
+                "username": username if username != "" else existing.get("username", ""),
+                "password": password if password != "" else existing.get("password", ""),
+                "totp": totp.strip().replace(" ", "").upper() if totp != "" else existing.get("totp", "")
+            }
+            updated = True
+
+        if updated:
+            self._save_data(data)
+            return f"Successfully updated '{name}' in vault"
+        return f"No changes provided for '{name}'"
 
     @tool(
         "vault.totp.code",

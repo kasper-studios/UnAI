@@ -92,6 +92,19 @@ enum VaultCmd {
         #[arg(value_name = "SERVICE")]
         service: String,
     },
+    /// Partially edit specific fields of existing credentials or secret
+    Edit {
+        #[arg(value_name = "NAME")]
+        name: String,
+        #[arg(long, short = 'u')]
+        username: Option<String>,
+        #[arg(long, short = 'p')]
+        password: Option<String>,
+        #[arg(long, short = 't')]
+        totp: Option<String>,
+        #[arg(long, short = 's')]
+        secret: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -442,6 +455,22 @@ except Exception as e:
     print(f"Error: {{e}}")
 "#,
                 serde_json::to_string(&service)?
+            )
+        }
+        VaultCmd::Edit { name, username, password, totp, secret } => {
+            format!(
+                r#"
+import asyncio
+from internalws.vault.workspace import VaultWorkspace
+ws = VaultWorkspace('vault')
+res = asyncio.run(ws.edit_entry({}, {}, {}, {}, {}))
+print(res)
+"#,
+                serde_json::to_string(&name)?,
+                serde_json::to_string(&username.unwrap_or_default())?,
+                serde_json::to_string(&password.unwrap_or_default())?,
+                serde_json::to_string(&totp.unwrap_or_default())?,
+                serde_json::to_string(&secret.unwrap_or_default())?
             )
         }
     };

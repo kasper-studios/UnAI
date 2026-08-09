@@ -50,3 +50,21 @@ async def test_list_and_remove(vault_ws):
 
     listing_after = await vault_ws.list_vault()
     assert "stripe_key" not in listing_after["secrets"]
+
+@pytest.mark.asyncio
+async def test_partial_edit(vault_ws):
+    await vault_ws.credentials_set("google", username="olduser@gmail.com", password="oldpassword", totp="JBSWY3DPEHPK3PXP")
+    
+    # Partial edit: update ONLY password
+    await vault_ws.edit_entry("google", password="newpassword")
+    
+    creds = await vault_ws.credentials_get("google")
+    assert creds["username"] == "olduser@gmail.com"  # preserved!
+    assert creds["password"] == "newpassword"         # updated!
+    assert creds["totp"] == "JBSWY3DPEHPK3PXP"       # preserved!
+
+    # Partial edit: update secret
+    await vault_ws.secret_set("my_api_key", "old_val")
+    await vault_ws.edit_entry("my_api_key", secret_value="new_val")
+    assert await vault_ws.secret_get("my_api_key") == "new_val"
+
