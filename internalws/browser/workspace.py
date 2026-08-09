@@ -3,6 +3,7 @@ import asyncio
 import base64
 import json
 import os
+from typing import Any, Dict, List, Optional
 import websockets
 from unai.sdk import Workspace, tool
 from unai.common.protocol import SettingsSchema, SettingItem
