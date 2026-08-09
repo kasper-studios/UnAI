@@ -132,20 +132,45 @@
 
   function domClick(selector) {
     const el = findEl(selector);
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    el.click();
+    try {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } catch {}
+    
+    // Dispatch full pointer & mouse event sequence for React / Discord custom components
+    const opts = { bubbles: true, cancelable: true, view: window };
+    try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch {}
+    try { el.dispatchEvent(new MouseEvent('mousedown', opts)); } catch {}
+    try { el.focus(); } catch {}
+    try { el.dispatchEvent(new PointerEvent('pointerup', opts)); } catch {}
+    try { el.dispatchEvent(new MouseEvent('mouseup', opts)); } catch {}
+    try { el.click(); } catch {}
+
     return `Clicked: ${selector}`;
   }
 
   function domType(selector, text) {
     const el = findEl(selector);
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    el.focus();
-    const proto = el instanceof HTMLTextAreaElement
-      ? HTMLTextAreaElement.prototype
-      : HTMLInputElement.prototype;
-    const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
-    setter.call(el, text); // нативный setter — React/подобные фреймворки увидят изменение
+    try {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } catch {}
+    try { el.focus(); } catch {}
+
+    if (el.tagName && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+      const proto = el instanceof HTMLTextAreaElement
+        ? HTMLTextAreaElement.prototype
+        : HTMLInputElement.prototype;
+      const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+      if (desc && desc.set) {
+        desc.set.call(el, text);
+      } else {
+        el.value = text;
+      }
+    } else if (el.isContentEditable) {
+      el.innerText = text;
+    } else {
+      el.value = text;
+    }
+
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
     return `Typed ${text.length} chars into: ${selector}`;
