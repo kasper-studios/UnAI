@@ -1,6 +1,8 @@
 """UnAI MCP Server implementation.
 Loads all enabled workspaces from ~/.unai/workspaces/, discovers their @tool decorated methods,
 and exposes them via Model Context Protocol (MCP) using stdio transport.
+
+Internal (built-in) workspaces from internalws/ are loaded first.
 """
 
 import asyncio
@@ -20,6 +22,85 @@ def get_unai_home() -> Path:
     return Path.home() / ".unai"
 
 
+def _find_runtime_dir() -> Path:
+    """Locate the runtime source directory (contains src/, internalws/, etc.).
+
+    Priority:
+    1. ~/.unai/src/main (production install)
+    2. Relative to this file: ../../ (dev — src/unai/mcp.py → main/)
+    """
+    prod = get_unai_home() / "src" / "main"
+    if prod.exists() and (prod / "pyproject.toml").exists():
+        return prod
+
+    # Dev fallback: this file is at <root>/src/unai/mcp.py → root = ../..
+    dev = Path(__file__).resolve().parent.parent.parent
+    if (dev / "pyproject.toml").exists():
+        return dev
+
+    return prod  # will fail gracefully later
+
+
+def _register_workspace_tools(ws_id: str, ws_path: Path) -> None:
+    """Load workspace.py from ws_path, find Workspace subclasses, register their @tool methods."""
+    ws_py = ws_path / "workspace.py"
+    if not ws_py.exists():
+        return
+
+    try:
+        sys.path.insert(0, str(ws_path))
+        spec = importlib.util.spec_from_file_location(f"workspace_{ws_id}", str(ws_py))
+        if spec and spec.loader:
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules[f"workspace_{ws_id}"] = mod
+            spec.loader.exec_module(mod)
+
+            for attr_name in dir(mod):
+                attr = getattr(mod, attr_name)
+                if isinstance(attr, type) and hasattr(attr, "_tools") and attr._tools:
+                    instance = attr(runtime_id=ws_id)
+                    for tool_name, tool_spec in instance.tools.items():
+                        fn = tool_spec.bound or tool_spec.handler
+                        if fn:
+                            mcp.tool(
+                                name=tool_spec.name,
+                                description=tool_spec.description,
+                            )(fn)
+    except Exception as e:
+        print(f"Error loading workspace {ws_id}: {e}", file=sys.stderr)
+
+
+def load_internal_workspaces() -> None:
+    """Load built-in workspaces from <runtime_dir>/internalws/."""
+    runtime_dir = _find_runtime_dir()
+    internalws_dir = runtime_dir / "internalws"
+    if not internalws_dir.exists():
+        return
+
+    for ws_path in internalws_dir.iterdir():
+        if not ws_path.is_dir():
+            continue
+        ws_id = ws_path.name
+
+        # Check manifest.toml for default_enabled
+        manifest_file = ws_path / "manifest.toml"
+        if not manifest_file.exists():
+            continue
+
+        enabled = False
+        try:
+            import toml
+            manifest = toml.loads(manifest_file.read_text())
+            enabled = manifest.get("default_enabled", False)
+        except Exception:
+            pass
+
+        if not enabled:
+            continue
+
+        _register_workspace_tools(ws_id, ws_path)
+
+
 def load_enabled_workspaces() -> None:
     workspaces_dir = get_unai_home() / "workspaces"
     if not workspaces_dir.exists():
@@ -29,7 +110,7 @@ def load_enabled_workspaces() -> None:
         if not ws_path.is_dir():
             continue
         ws_id = ws_path.name
-        
+
         # Check state.json
         state_file = ws_path / "state.json"
         enabled = False
@@ -53,37 +134,11 @@ def load_enabled_workspaces() -> None:
         if not enabled:
             continue
 
-        # Load workspace.py
-        ws_py = ws_path / "workspace.py"
-        if not ws_py.exists():
-            continue
-
-        try:
-            # Add workspace dir to sys.path temporarily
-            sys.path.insert(0, str(ws_path))
-            spec = importlib.util.spec_from_file_location(f"workspace_{ws_id}", str(ws_py))
-            if spec and spec.loader:
-                mod = importlib.util.module_from_spec(spec)
-                sys.modules[f"workspace_{ws_id}"] = mod
-                spec.loader.exec_module(mod)
-
-                # Find Workspace subclasses and instantiate them
-                for attr_name in dir(mod):
-                    attr = getattr(mod, attr_name)
-                    if isinstance(attr, type) and hasattr(attr, "_tools") and attr._tools:
-                        instance = attr(runtime_id=ws_id)
-                        for tool_name, tool_spec in instance.tools.items():
-                            fn = tool_spec.bound or tool_spec.handler
-                            if fn:
-                                mcp.tool(
-                                    name=tool_spec.name,
-                                    description=tool_spec.description,
-                                )(fn)
-        except Exception as e:
-            print(f"Error loading workspace {ws_id}: {e}", file=sys.stderr)
+        _register_workspace_tools(ws_id, ws_path)
 
 
 def main() -> None:
+    load_internal_workspaces()
     load_enabled_workspaces()
     mcp.run(transport="stdio")
 

@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use colored::Colorize;
 use std::path::PathBuf;
 
 /// UnAI — a workspace-oriented runtime for autonomous AI agents.
@@ -155,19 +156,44 @@ fn main() -> Result<()> {
         Some(Commands::Config { id }) => cmd_config(&root, &id),
         Some(Commands::Serve) => cmd_serve(&root),
         None if cli.mcp => cmd_serve(&root),
-        None => anyhow::bail!(
-            "no command given — try `unai --help` (or `unai --mcp` to start the MCP server)"
-        ),
+        None => {
+            println!(
+                "\n  {}  {}\n",
+                "⬡".cyan().bold(),
+                "UnAI".cyan().bold()
+            );
+            println!(
+                "  {}",
+                "Workspace-oriented runtime for autonomous AI agents".dimmed()
+            );
+            println!();
+            println!(
+                "  Run {} for usage information.",
+                "unai --help".yellow().bold()
+            );
+            println!(
+                "  Run {} to start the MCP server.\n",
+                "unai serve".yellow().bold()
+            );
+            Ok(())
+        }
     }
 }
 
 fn cmd_version(_root: &PathBuf) -> Result<()> {
-    println!("unai-cli {}", env!("CARGO_PKG_VERSION"));
     println!(
-        "runtime: {}",
-        pyproject_version().unwrap_or_else(|_| "unknown".into())
+        "{} {}",
+        "unai-cli".cyan().bold(),
+        env!("CARGO_PKG_VERSION").magenta()
     );
-    println!("protocol: 1.0");
+    println!(
+        "{} {}",
+        "runtime:".dimmed(),
+        pyproject_version()
+            .unwrap_or_else(|_| "unknown".into())
+            .magenta()
+    );
+    println!("{} {}", "protocol:".dimmed(), "1.0".magenta());
     Ok(())
 }
 
@@ -221,35 +247,66 @@ fn pyproject_version() -> Result<String> {
 }
 
 fn cmd_doctor(root: &PathBuf) -> Result<()> {
-    println!("UnAI doctor");
+    println!("{}", "UnAI Doctor".cyan().bold());
+    println!();
 
     let py = match venv_python(root) {
         Some(p) => p,
         None => {
-            println!("  ✗ venv  : NOT FOUND (run `unai install`)");
+            println!(
+                "  {} {}  {}",
+                "✗".red().bold(),
+                "venv".white(),
+                format!("NOT FOUND (run {})", "unai install".yellow().bold()).red()
+            );
             return Ok(());
         }
     };
-    println!("  ✓ venv  : {}", py.display());
+    println!(
+        "  {} {}  {}",
+        "✓".green().bold(),
+        "venv".white(),
+        py.display().to_string().dimmed()
+    );
 
     // venv python --version
     let ver = run(std::process::Command::new(&py)
         .arg("--version"))?;
     let python_ver = String::from_utf8_lossy(&ver.stdout);
-    println!("  ✓ python: {}", python_ver.trim());
+    println!(
+        "  {} {}  {}",
+        "✓".green().bold(),
+        "python".white(),
+        python_ver.trim().magenta()
+    );
 
     // runtime import check
     let imp = run(std::process::Command::new(&py)
         .arg("-c")
         .arg("import unai; print(unai.__file__ or 'ok')"))?;
     if imp.status.success() {
-        println!("  ✓ runtime import: ok");
+        println!(
+            "  {} {}  {}",
+            "✓".green().bold(),
+            "runtime import".white(),
+            "ok".green()
+        );
     } else {
-        println!("  ✗ runtime import: FAILED");
+        println!(
+            "  {} {}  {}",
+            "✗".red().bold(),
+            "runtime import".white(),
+            "FAILED".red().bold()
+        );
     }
 
     let rustc = run(std::process::Command::new("rustc").arg("--version"))?;
-    println!("  ✓ rustc : {}", String::from_utf8_lossy(&rustc.stdout).trim());
+    println!(
+        "  {} {}  {}",
+        "✓".green().bold(),
+        "rustc".white(),
+        String::from_utf8_lossy(&rustc.stdout).trim().magenta()
+    );
     Ok(())
 }
 
@@ -257,37 +314,61 @@ fn cmd_doctor(root: &PathBuf) -> Result<()> {
 fn cmd_install(root: &PathBuf, force: bool) -> Result<()> {
     let venv = root.join(VENV_DIR);
     if venv.exists() && !force {
-        println!("venv already exists at {}. Run `unai install --force` to recreate.", venv.display());
-        println!("hint: `unai doctor` to verify.");
+        println!(
+            "venv already exists at {}.",
+            venv.display().to_string().dimmed()
+        );
+        println!(
+            "Run {} to recreate.",
+            "unai install --force".yellow().bold()
+        );
+        println!(
+            "hint: {} to verify.",
+            "unai doctor".yellow().bold()
+        );
         return Ok(());
     }
     if force && venv.exists() {
         std::fs::remove_dir_all(&venv)
             .with_context(|| format!("failed to remove stale {venv:?}"))?;
-        println!("removed stale venv {}.", venv.display());
+        println!(
+            "removed stale venv {}.",
+            venv.display().to_string().dimmed()
+        );
     }
 
-    println!("creating venv at {} ...", venv.display());
+    println!(
+        "creating venv at {} ...",
+        venv.display().to_string().dimmed()
+    );
     let out = run(std::process::Command::new("python3").args(["-m", "venv", &VENV_DIR]).current_dir(root))?;
     if !out.status.success() {
         anyhow::bail!("python3 -m venv failed: {}", String::from_utf8_lossy(&out.stderr));
     }
 
     let py = venv_python(root).context("venv created but python not found")?;
-    println!("editable-installing 'unai' runtime ...");
+    println!("editable-installing {} runtime ...", "unai".cyan());
     let pip = run(std::process::Command::new(&py)
         .arg("-m").arg("pip").arg("install").arg("-q").arg("-e").arg(root)
         .current_dir(root))?;
     if !pip.status.success() {
-        println!("warn: editable install failed (runtime not on PATH): {}", String::from_utf8_lossy(&pip.stderr));
+        println!(
+            "{} editable install failed (runtime not on PATH): {}",
+            "warn:".yellow().bold(),
+            String::from_utf8_lossy(&pip.stderr)
+        );
     }
-    println!("done. (unai doctor) to verify.");
+    println!(
+        "{}  ({} to verify.)",
+        "done.".green().bold(),
+        "unai doctor".yellow().bold()
+    );
     Ok(())
 }
 
 
 fn cmd_update(_root: &PathBuf, runtime_only: bool) -> Result<()> {
-    println!("=== UnAI Update ===\n");
+    println!("\n{}\n", "=== UnAI Update ===".cyan().bold());
 
     // 1. Update CLI binary (unless --runtime-only)
     if !runtime_only {
@@ -315,14 +396,20 @@ fn cmd_update(_root: &PathBuf, runtime_only: bool) -> Result<()> {
                     .filter(|t| !t.is_empty() && t != "latest")
             }
             Err(e) => {
-                println!("  ⚠ Failed to check for updates: {e}");
+                println!(
+                    "  {} Failed to check for updates: {e}",
+                    "⚠".yellow().bold()
+                );
                 println!("  Skipping CLI update");
                 return update_python_runtime();
             }
         };
 
         if let Some(tag) = tag {
-            println!("  Latest release: {tag}");
+            println!(
+                "  Latest release: {}",
+                tag.magenta()
+            );
 
             // Detect platform
             let os = std::env::consts::OS;
@@ -333,7 +420,10 @@ fn cmd_update(_root: &PathBuf, runtime_only: bool) -> Result<()> {
                 ("macos", "x86_64") => (["x86_64-apple-darwin"], false),
                 ("macos", "aarch64") => (["aarch64-apple-darwin"], false),
                 _ => {
-                    println!("  ⚠ Pre-built binary not available for {os}-{arch}");
+                    println!(
+                        "  {} Pre-built binary not available for {os}-{arch}",
+                        "⚠".yellow().bold()
+                    );
                     println!("  Skipping CLI update (use source build manually if needed)");
                     return update_python_runtime();
                 }
@@ -359,7 +449,10 @@ fn cmd_update(_root: &PathBuf, runtime_only: bool) -> Result<()> {
                 let download_url = format!(
                     "https://github.com/{repo}/releases/download/{tag}/unai-{t}"
                 );
-                println!("  Downloading {download_url}...");
+                println!(
+                    "  Downloading {} ...",
+                    download_url.dimmed()
+                );
                 match reqwest::blocking::Client::new()
                     .get(&download_url)
                     .header(reqwest::header::USER_AGENT, "unai-cli/update")
@@ -369,7 +462,10 @@ fn cmd_update(_root: &PathBuf, runtime_only: bool) -> Result<()> {
                         let bytes = match resp.bytes() {
                             Ok(b) => b,
                             Err(e) => {
-                                println!("  ⚠ Download failed (read): {e}");
+                                println!(
+                                    "  {} Download failed (read): {e}",
+                                    "⚠".yellow().bold()
+                                );
                                 continue;
                             }
                         };
@@ -377,7 +473,10 @@ fn cmd_update(_root: &PathBuf, runtime_only: bool) -> Result<()> {
                         // Write to temp file, then replace current binary
                         let temp_path = current_exe.with_extension("new");
                         if let Err(e) = std::fs::write(&temp_path, &bytes) {
-                            println!("  ⚠ Write failed: {e}");
+                            println!(
+                                "  {} Write failed: {e}",
+                                "⚠".yellow().bold()
+                            );
                             continue;
                         }
 
@@ -387,13 +486,19 @@ fn cmd_update(_root: &PathBuf, runtime_only: bool) -> Result<()> {
                             let mut perms = match std::fs::metadata(&temp_path) {
                                 Ok(m) => m.permissions(),
                                 Err(e) => {
-                                    println!("  ⚠ chmod metadata failed: {e}");
+                                    println!(
+                                        "  {} chmod metadata failed: {e}",
+                                        "⚠".yellow().bold()
+                                    );
                                     continue;
                                 }
                             };
                             perms.set_mode(0o755);
                             if let Err(e) = std::fs::set_permissions(&temp_path, perms) {
-                                println!("  ⚠ chmod failed: {e}");
+                                println!(
+                                    "  {} chmod failed: {e}",
+                                    "⚠".yellow().bold()
+                                );
                                 continue;
                             }
                         }
@@ -401,18 +506,32 @@ fn cmd_update(_root: &PathBuf, runtime_only: bool) -> Result<()> {
                         // Atomic replace
                         match std::fs::rename(&temp_path, &current_exe) {
                             Ok(_) => {
-                                println!("  ✓ CLI binary updated to {tag} (unai-{t})");
+                                println!(
+                                    "  {} CLI binary updated to {} (unai-{t})",
+                                    "✓".green().bold(),
+                                    tag.magenta()
+                                );
                                 downloaded = true;
                             }
-                            Err(e) => println!("  ⚠ rename failed: {e}"),
+                            Err(e) => println!(
+                                "  {} rename failed: {e}",
+                                "⚠".yellow().bold()
+                            ),
                         }
                         break;
                     }
                     Ok(resp) => {
-                        println!("  ⚠ Binary not found for {t} ({})", resp.status());
+                        println!(
+                            "  {} Binary not found for {t} ({})",
+                            "⚠".yellow().bold(),
+                            resp.status()
+                        );
                     }
                     Err(e) => {
-                        println!("  ⚠ Download failed: {e}");
+                        println!(
+                            "  {} Download failed: {e}",
+                            "⚠".yellow().bold()
+                        );
                     }
                 }
             }
@@ -420,7 +539,10 @@ fn cmd_update(_root: &PathBuf, runtime_only: bool) -> Result<()> {
                 println!("  Skipping CLI update");
             }
         } else {
-            println!("  ⚠ No releases found");
+            println!(
+                "  {} No releases found",
+                "⚠".yellow().bold()
+            );
             println!("  Skipping CLI update");
         }
         println!();
@@ -445,15 +567,25 @@ fn update_python_runtime() -> Result<()> {
         )?;
         
         if !out.status.success() {
-            println!("  ⚠ git pull failed: {}", String::from_utf8_lossy(&out.stderr));
+            println!(
+                "  {} git pull failed: {}",
+                "⚠".yellow().bold(),
+                String::from_utf8_lossy(&out.stderr)
+            );
             return Ok(());
         }
         
         let stdout = String::from_utf8_lossy(&out.stdout);
         if stdout.contains("Already up to date") {
-            println!("  ✓ Runtime already up to date");
+            println!(
+                "  {} Runtime already up to date",
+                "✓".green().bold()
+            );
         } else {
-            println!("  ✓ Runtime updated");
+            println!(
+                "  {} Runtime updated",
+                "✓".green().bold()
+            );
             
             // Reinstall Python package
             println!("  Reinstalling Python package...");
@@ -465,14 +597,24 @@ fn update_python_runtime() -> Result<()> {
                 )?;
                 
                 if pip.status.success() {
-                    println!("  ✓ Package reinstalled");
+                    println!(
+                        "  {} Package reinstalled",
+                        "✓".green().bold()
+                    );
                 } else {
-                    println!("  ⚠ Package reinstall failed: {}", String::from_utf8_lossy(&pip.stderr));
+                    println!(
+                        "  {} Package reinstall failed: {}",
+                        "⚠".yellow().bold(),
+                        String::from_utf8_lossy(&pip.stderr)
+                    );
                 }
             }
         }
     } else {
-        println!("  No existing runtime installation found at {}", src_dir.display());
+        println!(
+            "  No existing runtime installation found at {}",
+            src_dir.display().to_string().dimmed()
+        );
         println!("  Installing runtime from GitHub...");
         
         std::fs::create_dir_all(&unai_home.join("src"))?;
@@ -491,7 +633,10 @@ fn update_python_runtime() -> Result<()> {
             anyhow::bail!("git clone failed: {}", String::from_utf8_lossy(&out.stderr));
         }
         
-        println!("  ✓ Runtime cloned");
+        println!(
+            "  {} Runtime cloned",
+            "✓".green().bold()
+        );
         
         // Create venv and install
         println!("  Creating venv...");
@@ -514,15 +659,27 @@ fn update_python_runtime() -> Result<()> {
             )?;
             
             if pip.status.success() {
-                println!("  ✓ Runtime installed");
+                println!(
+                    "  {} Runtime installed",
+                    "✓".green().bold()
+                );
             } else {
-                println!("  ⚠ Package install failed: {}", String::from_utf8_lossy(&pip.stderr));
+                println!(
+                    "  {} Package install failed: {}",
+                    "⚠".yellow().bold(),
+                    String::from_utf8_lossy(&pip.stderr)
+                );
             }
         }
     }
     
-    println!("\n=== Update Complete ===");
-    println!("Run `unai --version` to verify.");
+    println!(
+        "\n{}", "=== Update Complete ===".cyan().bold()
+    );
+    println!(
+        "Run {} to verify.",
+        "unai --version".yellow().bold()
+    );
     Ok(())
 }
 
@@ -530,7 +687,7 @@ fn update_python_runtime() -> Result<()> {
 fn cmd_workspace(root: &PathBuf, cmd: WorkspaceCmd) -> Result<()> {
     match cmd {
         WorkspaceCmd::List => {
-            println!("workspaces:");
+            println!("{}", "Workspaces:".cyan().bold());
             // Discover installed workspaces in ~/.unai/workspaces OR bundled src/unai/workspaces
             let ws_dir = root.join("src").join("unai").join("workspaces");
             let mut ids: Vec<String> = Vec::new();
@@ -554,18 +711,52 @@ fn cmd_workspace(root: &PathBuf, cmd: WorkspaceCmd) -> Result<()> {
                     }
                 }
             }
+            // Also list internal workspaces from internalws/
+            let internal_dir = root.join("internalws");
+            if let Ok(entries) = std::fs::read_dir(&internal_dir) {
+                for e in entries.flatten() {
+                    if let Some(name) = e.file_name().to_str() {
+                        if e.path().join("manifest.toml").exists() {
+                            ids.push(name.to_string());
+                        }
+                    }
+                }
+            }
             ids.sort();
             ids.dedup();
+            if ids.is_empty() {
+                println!("  {}", "(no workspaces found)".dimmed());
+            }
             for id in ids {
                 let enabled = workspace_enabled(root, &id);
                 let default_enabled = workspace_default_enabled(root, &id);
-                let status = if enabled {
-                    "● Enabled"
+                if enabled {
+                    let dflt = if default_enabled {
+                        " (default: on)".dimmed().to_string()
+                    } else {
+                        String::new()
+                    };
+                    println!(
+                        "  {} {} {}{}",
+                        "●".green().bold(),
+                        "Enabled ".green(),
+                        id.cyan().bold(),
+                        dflt
+                    );
                 } else {
-                    "○ Disabled"
-                };
-                let dflt = if default_enabled { " (default: on)" } else { "" };
-                println!("  {status:12} {id}{dflt}");
+                    let dflt = if default_enabled {
+                        " (default: on)".dimmed().to_string()
+                    } else {
+                        String::new()
+                    };
+                    println!(
+                        "  {} {} {}{}",
+                        "○".dimmed(),
+                        "Disabled".dimmed(),
+                        id.cyan(),
+                        dflt
+                    );
+                }
             }
         }
         WorkspaceCmd::Install { id, path } => cmd_workspace_install(root, &id, path.as_deref())?,
@@ -575,13 +766,21 @@ fn cmd_workspace(root: &PathBuf, cmd: WorkspaceCmd) -> Result<()> {
             let state = workspace_state_path(root, &id);
             std::fs::create_dir_all(state.parent().context("no state parent")?)?;
             std::fs::write(&state, "{\"enabled\": true}\n")?;
-            println!("workspace '{id}' enabled (started on next runtime launch)");
+            println!(
+                "{} workspace {} enabled (started on next runtime launch)",
+                "✓".green().bold(),
+                id.cyan().bold()
+            );
         }
         WorkspaceCmd::Disable { id } => {
             let state = workspace_state_path(root, &id);
             std::fs::create_dir_all(state.parent().context("no state parent")?)?;
             std::fs::write(&state, "{\"enabled\": false}\n")?;
-            println!("workspace '{id}' disabled (kept in registry)");
+            println!(
+                "{} workspace {} disabled (kept in registry)",
+                "✓".green().bold(),
+                id.cyan().bold()
+            );
         }
         WorkspaceCmd::ResetSession { id } => {
             cmd_reset_session(root, &id)?;
@@ -604,19 +803,32 @@ fn cmd_reset_session(root: &PathBuf, id: &str) -> Result<()> {
         std::fs::remove_file(&session_file)
             .with_context(|| format!("remove session file {}", session_file.display()))?;
         removed_any = true;
-        println!("  removed {}", session_file.display());
+        println!(
+            "  removed {}",
+            session_file.display().to_string().dimmed()
+        );
     }
     let tokens_dir = data_dir.join("tokens");
     if tokens_dir.exists() {
         std::fs::remove_dir_all(&tokens_dir)
             .with_context(|| format!("remove tokens dir {}", tokens_dir.display()))?;
         removed_any = true;
-        println!("  removed {}", tokens_dir.display());
+        println!(
+            "  removed {}",
+            tokens_dir.display().to_string().dimmed()
+        );
     }
     if !removed_any {
-        println!("workspace '{id}' has no saved session (nothing to reset).");
+        println!(
+            "workspace {} has no saved session (nothing to reset).",
+            id.cyan().bold()
+        );
     }
-    println!("session reset: login tools for '{id}' will reappear on next runtime load (ADR-0004).");
+    println!(
+        "{} session reset: login tools for {} will reappear on next runtime load (ADR-0004).",
+        "✓".green().bold(),
+        id.cyan().bold()
+    );
     Ok(())
 }
 
@@ -751,7 +963,11 @@ fn cmd_workspace_install(root: &PathBuf, id: &str, local_path: Option<&str>) -> 
     }
     std::fs::create_dir_all(&dest).context("create workspace install dir")?;
     copy_dir_recursive(&pkg, &dest)?;
-    println!("installed workspace '{id}' -> {}", dest.display());
+    println!(
+        "installed workspace {} → {}",
+        id.cyan().bold(),
+        dest.display().to_string().dimmed()
+    );
 
     // Lifecycle: install(ctx)
     run_lifecycle_hook(root, id, &dest, "install")?;
@@ -759,7 +975,10 @@ fn cmd_workspace_install(root: &PathBuf, id: &str, local_path: Option<&str>) -> 
     // Данные: ~/.unai/data/<id>/
     let data_dir = dirs_home().join(".unai").join("data").join(id);
     std::fs::create_dir_all(&data_dir).context("create workspace data dir")?;
-    println!("workspace data dir -> {}", data_dir.display());
+    println!(
+        "workspace data dir → {}",
+        data_dir.display().to_string().dimmed()
+    );
 
     // Стартовый state: не enabled (default_enabled применяется при старте рантайма)
     let state = workspace_state_path(root, id);
@@ -767,7 +986,12 @@ fn cmd_workspace_install(root: &PathBuf, id: &str, local_path: Option<&str>) -> 
     if !state.exists() {
         std::fs::write(&state, "{\"enabled\": false}\n")?;
     }
-    println!("workspace '{id}' installed (disabled by default; `unai workspace enable {id}` to run)");
+    println!(
+        "{} workspace {} installed (disabled by default; {} to run)",
+        "✓".green().bold(),
+        id.cyan().bold(),
+        format!("unai workspace enable {id}").yellow().bold()
+    );
     Ok(())
 }
 
@@ -775,7 +999,7 @@ fn cmd_workspace_install(root: &PathBuf, id: &str, local_path: Option<&str>) -> 
 fn cmd_workspace_uninstall(root: &PathBuf, id: &str) -> Result<()> {
     let dest = dirs_home().join(".unai").join("workspaces").join(id);
     if !dest.exists() {
-        anyhow::bail!("workspace '{id}' is not installed (~/.unai/workspaces/{id})");
+        anyhow::bail!("workspace '{}' is not installed (~/.unai/workspaces/{})", id, id);
     }
     run_lifecycle_hook(root, id, &dest, "uninstall")?;
     std::fs::remove_dir_all(&dest).context("remove workspace dir")?;
@@ -788,7 +1012,11 @@ fn cmd_workspace_uninstall(root: &PathBuf, id: &str) -> Result<()> {
     if state.exists() {
         std::fs::remove_file(&state).ok();
     }
-    println!("workspace '{id}' uninstalled (code + data removed)");
+    println!(
+        "{} workspace {} uninstalled (code + data removed)",
+        "✓".green().bold(),
+        id.cyan().bold()
+    );
     Ok(())
 }
 
@@ -796,7 +1024,10 @@ fn cmd_workspace_uninstall(root: &PathBuf, id: &str) -> Result<()> {
 fn cmd_workspace_update(root: &PathBuf, id: &str) -> Result<()> {
     let dest = dirs_home().join(".unai").join("workspaces").join(id);
     if !dest.exists() {
-        anyhow::bail!("workspace '{id}' is not installed — run `unai workspace install {id}` first");
+        anyhow::bail!(
+            "workspace '{}' is not installed — run `unai workspace install {}` first",
+            id, id
+        );
     }
     // Переустановка: свежий пакет поверх старого (данные в ~/.unai/data не трогаем).
     let pkg = fetch_workspace_package(root, id, None)?;
@@ -804,7 +1035,12 @@ fn cmd_workspace_update(root: &PathBuf, id: &str) -> Result<()> {
     std::fs::create_dir_all(&dest).context("create workspace dir")?;
     copy_dir_recursive(&pkg, &dest)?;
     run_lifecycle_hook(root, id, &dest, "install")?;
-    println!("workspace '{id}' updated (data preserved in ~/.unai/data/{id})");
+    println!(
+        "{} workspace {} updated (data preserved in {})",
+        "✓".green().bold(),
+        id.cyan().bold(),
+        format!("~/.unai/data/{id}").dimmed()
+    );
     Ok(())
 }
 
@@ -850,6 +1086,16 @@ fn workspace_enabled(root: &PathBuf, id: &str) -> bool {
 /// Прочитать `default_enabled` из манифеста воркспейса (через venv-python).
 /// По умолчанию false — если модуль не найден или поле не задано.
 fn workspace_default_enabled(root: &PathBuf, id: &str) -> bool {
+    // First try manifest.toml (for internal workspaces)
+    let internal_manifest = root.join("internalws").join(id).join("manifest.toml");
+    if internal_manifest.exists() {
+        if let Ok(content) = std::fs::read_to_string(&internal_manifest) {
+            if content.contains("default_enabled = true") {
+                return true;
+            }
+        }
+    }
+
     let py = match venv_python(root) {
         Some(p) => p,
         None => return false,
@@ -900,8 +1146,9 @@ fn workspace_module_path(root: &PathBuf, id: &str) -> Result<PathBuf> {
 fn cmd_config(root: &PathBuf, id: &str) -> Result<()> {
     let module_path = workspace_module_path(root, id)?;
     println!(
-        "loading settings schema for workspace '{id}' from {}",
-        module_path.display()
+        "loading settings schema for workspace {} from {}",
+        id.cyan().bold(),
+        module_path.display().to_string().dimmed()
     );
 
     // Загружаем манифест через venv-питон: импортируем модуль воркспейса
@@ -941,7 +1188,10 @@ else:
         .map_err(|e| anyhow::anyhow!("schema parse failed: {e}\nraw: {json_str}"))?;
 
     if schema.get("error").is_some() {
-        println!("workspace '{id}' has no settings schema (nothing to configure).");
+        println!(
+            "workspace {} has no settings schema (nothing to configure).",
+            id.cyan().bold()
+        );
         return Ok(());
     }
 
@@ -949,7 +1199,7 @@ else:
         .get("title")
         .and_then(|v| v.as_str())
         .unwrap_or(id);
-    println!("== {title} ==");
+    println!("\n{}\n", format!("== {title} ==").cyan().bold());
 
     let mut answers: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
     let items = schema.get("items").and_then(|v| v.as_object());
@@ -979,7 +1229,10 @@ else:
                         .unwrap_or_default();
                     if choices.is_empty() {
                         // Динамический выбор — пока заглушка (provider в Phase 5).
-                        println!("  [dynamic choice via provider — Phase 5] {item_title}");
+                        println!(
+                            "  {} {item_title}",
+                            "[dynamic choice via provider — Phase 5]".dimmed()
+                        );
                         continue;
                     }
                     let default_idx = if let Some(d) = default.and_then(|d| d.as_str()) {
@@ -996,7 +1249,7 @@ else:
                 }
                 "action" => {
                     let confirm = dialoguer::Confirm::with_theme(&dialoguer::theme::ColorfulTheme::default())
-                        .with_prompt(format!("{item_title}? (выполнить действие)"))
+                        .with_prompt(format!("{item_title}? (execute action)"))
                         .default(false)
                         .interact()?;
                     if confirm {
@@ -1024,7 +1277,10 @@ else:
     }
 
     if answers.is_empty() {
-        println!("no answers collected (schema empty).");
+        println!(
+            "no answers collected ({}).",
+            "schema empty".dimmed()
+        );
         return Ok(());
     }
 
@@ -1038,8 +1294,11 @@ else:
         serde_json::to_string_pretty(&serde_json::Value::Object(answers))?,
     )
     .with_context(|| format!("write {}", settings_path.display()))?;
-    println!("saved settings -> {}", settings_path.display());
+    println!(
+        "{} saved settings → {}",
+        "✓".green().bold(),
+        settings_path.display().to_string().dimmed()
+    );
 
     Ok(())
 }
-
