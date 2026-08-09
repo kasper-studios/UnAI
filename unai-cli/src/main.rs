@@ -1130,17 +1130,27 @@ except Exception:
 // `set_settings` воркспейса. Без единой ветки под конкретный воркспейс.
 // ---------------------------------------------------------------------------
 
-/// Найти файл модуля воркспейса: src/unai/workspaces/<id>.py
+/// Найти файл модуля воркспейса (internal, installed, or legacy).
 fn workspace_module_path(root: &PathBuf, id: &str) -> Result<PathBuf> {
-    let path = root
-        .join("src")
-        .join("unai")
-        .join("workspaces")
-        .join(format!("{id}.py"));
-    if !path.exists() {
-        anyhow::bail!("workspace '{id}' not found in src/unai/workspaces/");
+    // 1. Internal workspaces: internalws/<id>/workspace.py
+    let internal = root.join("internalws").join(id).join("workspace.py");
+    if internal.exists() {
+        return Ok(internal);
     }
-    Ok(path)
+    
+    // 2. Installed workspaces: ~/.unai/workspaces/<id>/workspace.py
+    let installed = dirs_home().join(".unai").join("workspaces").join(id).join("workspace.py");
+    if installed.exists() {
+        return Ok(installed);
+    }
+    
+    // 3. Legacy/bundled: src/unai/workspaces/<id>.py
+    let legacy = root.join("src").join("unai").join("workspaces").join(format!("{id}.py"));
+    if legacy.exists() {
+        return Ok(legacy);
+    }
+
+    anyhow::bail!("workspace '{id}' not found in internalws, ~/.unai/workspaces, or src/unai/workspaces");
 }
 
 fn cmd_config(root: &PathBuf, id: &str) -> Result<()> {
@@ -1151,16 +1161,16 @@ fn cmd_config(root: &PathBuf, id: &str) -> Result<()> {
         module_path.display().to_string().dimmed()
     );
 
-    // Загружаем манифест через venv-питон: импортируем модуль воркспейса
-    // и просим его выдать settings-схему как JSON (значения — отдельно).
     let py = venv_python(root).context("venv not found — run `unai install` first")?;
     let code = format!(
         r#"
-import json, sys
+import json, sys, importlib.util
 sys.path.insert(0, '{}')
-from unai.workspaces.{id} import *
-import unai.workspaces.{id} as m
-# Если модуль экспортирует схему константой или манифестом, выводим её
+
+spec = importlib.util.spec_from_file_location("ws_module", '{}')
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+
 schema = getattr(m, 'EXAMPLE_SETTINGS_SCHEMA', None)
 if schema is None:
     for attr in dir(m):
@@ -1173,7 +1183,8 @@ if schema is None:
 else:
     print(json.dumps(schema.to_dict()))
 "#,
-        root.join("src").display()
+        root.join("src").display(),
+        module_path.display()
     );
     let out = run(std::process::Command::new(&py).arg("-c").arg(&code))?;
     if !out.status.success() {
