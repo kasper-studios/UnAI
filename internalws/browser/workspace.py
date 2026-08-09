@@ -286,23 +286,27 @@ class BrowserWorkspace(Workspace):
     )
     async def open_browser(self, url: str = "about:blank", reason: Optional[str] = None) -> str:
         await self._ensure_server_started()
-        if self._active_websocket:
-            await self._send_request("browser.navigate", {"url": url})
-            return f"Successfully opened URL in active browser: {url}"
-        else:
+        if not self._active_websocket:
             import webbrowser
             try:
                 webbrowser.open(url)
-                return (
-                    f"Bridge was not active. Attempted to open system browser at {url}. "
-                    "Please ensure the KasperBridge extension/userscript is installed "
-                    "so it auto-connects to UnAI."
-                )
             except Exception as e:
-                return (
-                    f"Failed to launch system browser: {e}. "
-                    "Please start your browser manually and ensure KasperBridge is active."
-                )
+                return f"Failed to launch system browser: {e}. Please start your browser manually."
+
+            # Wait up to 5 seconds for the extension/userscript to auto-connect to ws://127.0.0.1:8055
+            for _ in range(50):
+                if self._active_websocket:
+                    break
+                await asyncio.sleep(0.1)
+
+        if self._active_websocket:
+            await self._send_request("browser.navigate", {"url": url})
+            return f"Successfully opened URL in browser: {url}"
+        else:
+            return (
+                f"Opened system browser at {url}, but KasperBridge extension did not connect within 5s. "
+                "Please make sure the UnAI Bridge extension is active."
+            )
 
     @tool(
         "browser.navigate",
