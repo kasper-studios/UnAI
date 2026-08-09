@@ -105,6 +105,28 @@
                         break;
                     }
 
+                    case 'dom.press': {
+                        let el = params.selector ? document.querySelector(params.selector) : (document.activeElement || document.body);
+                        if (params.selector && !el) throw new Error(`Element not found: ${params.selector}`);
+                        if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        if (el && el.focus) el.focus();
+                        simulateKeyPress(el, params.key);
+                        result = `Pressed key: ${params.key}`;
+                        break;
+                    }
+
+                    case 'dom.send_keys': {
+                        let el = params.selector ? document.querySelector(params.selector) : (document.activeElement || document.body);
+                        if (params.selector && !el) throw new Error(`Element not found: ${params.selector}`);
+                        if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        if (el && el.focus) el.focus();
+                        for (const char of params.text) {
+                            simulateKeyPress(el, char);
+                        }
+                        result = `Sent keys into element: ${params.selector}`;
+                        break;
+                    }
+
                     case 'dom.wait': {
                         const selector = params.selector;
                         const timeout = params.timeout_ms || 5000;
@@ -157,6 +179,91 @@
         const canvas = await window.html2canvas(document.body, { useCORS: true, logging: false });
         const dataUrl = canvas.toDataURL('image/png');
         return dataUrl.split(',')[1];
+    }
+
+    function parseKeySpec(keySpec) {
+        if (!keySpec) throw new Error('Key specification required');
+        const parts = String(keySpec).split('+').map(s => s.trim());
+        let key = parts[parts.length - 1];
+
+        const ctrlKey = parts.some(p => /^ctrl(ol)?$/i.test(p));
+        const shiftKey = parts.some(p => /^shift$/i.test(p));
+        const altKey = parts.some(p => /^alt$/i.test(p));
+        const metaKey = parts.some(p => /^(meta|cmd|command|win)$/i.test(p));
+
+        const keyMap = {
+            'esc': 'Escape', 'escape': 'Escape', 'enter': 'Enter', 'return': 'Enter',
+            'tab': 'Tab', 'space': ' ', 'backspace': 'Backspace', 'delete': 'Delete',
+            'up': 'ArrowUp', 'down': 'ArrowDown', 'left': 'ArrowLeft', 'right': 'ArrowRight',
+            'arrowup': 'ArrowUp', 'arrowdown': 'ArrowDown', 'arrowleft': 'ArrowLeft', 'arrowright': 'ArrowRight'
+        };
+
+        const lowerKey = key.toLowerCase();
+        if (keyMap[lowerKey]) { key = keyMap[lowerKey]; }
+        else if (key.length === 1) { key = shiftKey ? key.toUpperCase() : key; }
+
+        let code = key; let keyCode = 0;
+        if (key === 'Enter') { code = 'Enter'; keyCode = 13; }
+        else if (key === 'Escape') { code = 'Escape'; keyCode = 27; }
+        else if (key === 'Tab') { code = 'Tab'; keyCode = 9; }
+        else if (key === 'Backspace') { code = 'Backspace'; keyCode = 8; }
+        else if (key === 'Delete') { code = 'Delete'; keyCode = 46; }
+        else if (key === ' ') { code = 'Space'; keyCode = 32; }
+        else if (key === 'ArrowUp') { code = 'ArrowUp'; keyCode = 38; }
+        else if (key === 'ArrowDown') { code = 'ArrowDown'; keyCode = 40; }
+        else if (key === 'ArrowLeft') { code = 'ArrowLeft'; keyCode = 37; }
+        else if (key === 'ArrowRight') { code = 'ArrowRight'; keyCode = 39; }
+        else if (key.length === 1) {
+            const charCode = key.toUpperCase().charCodeAt(0);
+            keyCode = charCode;
+            if (charCode >= 65 && charCode <= 90) code = 'Key' + key.toUpperCase();
+            else if (charCode >= 48 && charCode <= 57) code = 'Digit' + key;
+        }
+
+        return { key, code, keyCode, ctrlKey, shiftKey, altKey, metaKey };
+    }
+
+    function simulateKeyPress(target, keySpec) {
+        const k = parseKeySpec(keySpec);
+        const opts = { key: k.key, code: k.code, keyCode: k.keyCode, which: k.keyCode, ctrlKey: k.ctrlKey, shiftKey: k.shiftKey, altKey: k.altKey, metaKey: k.metaKey, bubbles: true, cancelable: true, composed: true, view: window };
+        const downEv = new KeyboardEvent('keydown', opts);
+        const pressEv = new KeyboardEvent('keypress', opts);
+        const upEv = new KeyboardEvent('keyup', opts);
+
+        const cancelled = !target.dispatchEvent(downEv);
+        if (k.key.length === 1 || k.key === 'Enter') target.dispatchEvent(pressEv);
+
+        if (!cancelled) {
+            if (k.key === 'Enter') {
+                if (target.form) { try { target.form.requestSubmit ? target.form.requestSubmit() : target.form.submit(); } catch {} }
+            } else if (k.key === 'Backspace') {
+                if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+                    const start = target.selectionStart; const end = target.selectionEnd;
+                    if (start !== null && end !== null && (start > 0 || start !== end)) {
+                        const val = target.value;
+                        const newPos = start === end ? start - 1 : start;
+                        target.value = val.slice(0, newPos) + val.slice(end);
+                        target.setSelectionRange(newPos, newPos);
+                        target.dispatchEvent(new Event('input', { bubbles: true }));
+                        target.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                }
+            } else if (k.key.length === 1 && !k.ctrlKey && !k.metaKey && !k.altKey) {
+                if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+                    const start = target.selectionStart; const end = target.selectionEnd;
+                    if (start !== null && end !== null) {
+                        const val = target.value;
+                        target.value = val.slice(0, start) + k.key + val.slice(end);
+                        target.setSelectionRange(start + 1, start + 1);
+                        target.dispatchEvent(new Event('input', { bubbles: true }));
+                        target.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                } else if (target.isContentEditable) {
+                    try { document.execCommand('insertText', false, k.key); } catch {}
+                }
+            }
+        }
+        target.dispatchEvent(upEv);
     }
 
     window.addEventListener('load', sendStatus);

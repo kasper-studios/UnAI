@@ -67,6 +67,14 @@
           sendResponse({ result: domType(params.selector, params.text) });
           break;
 
+        case 'dom.press':
+          sendResponse({ result: domPress(params.key, params.selector) });
+          break;
+
+        case 'dom.send_keys':
+          sendResponse({ result: domSendKeys(params.selector, params.text) });
+          break;
+
         case 'dom.wait':
           domWait(params.selector, params.timeout_ms)
             .then(result => sendResponse({ result }))
@@ -174,6 +182,170 @@
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
     return `Typed ${text.length} chars into: ${selector}`;
+  }
+
+  function parseKeySpec(keySpec) {
+    if (!keySpec) throw new Error('Key specification required (e.g. "Enter", "Escape", "Control+a")');
+    const parts = String(keySpec).split('+').map(s => s.trim());
+    let key = parts[parts.length - 1];
+
+    const ctrlKey = parts.some(p => /^ctrl(ol)?$/i.test(p));
+    const shiftKey = parts.some(p => /^shift$/i.test(p));
+    const altKey = parts.some(p => /^alt$/i.test(p));
+    const metaKey = parts.some(p => /^(meta|cmd|command|win)$/i.test(p));
+
+    const keyMap = {
+      'esc': 'Escape',
+      'escape': 'Escape',
+      'enter': 'Enter',
+      'return': 'Enter',
+      'tab': 'Tab',
+      'space': ' ',
+      'backspace': 'Backspace',
+      'delete': 'Delete',
+      'up': 'ArrowUp',
+      'down': 'ArrowDown',
+      'left': 'ArrowLeft',
+      'right': 'ArrowRight',
+      'arrowup': 'ArrowUp',
+      'arrowdown': 'ArrowDown',
+      'arrowleft': 'ArrowLeft',
+      'arrowright': 'ArrowRight',
+    };
+
+    const lowerKey = key.toLowerCase();
+    if (keyMap[lowerKey]) {
+      key = keyMap[lowerKey];
+    } else if (key.length === 1) {
+      key = shiftKey ? key.toUpperCase() : key;
+    }
+
+    let code = key;
+    let keyCode = 0;
+    if (key === 'Enter') { code = 'Enter'; keyCode = 13; }
+    else if (key === 'Escape') { code = 'Escape'; keyCode = 27; }
+    else if (key === 'Tab') { code = 'Tab'; keyCode = 9; }
+    else if (key === 'Backspace') { code = 'Backspace'; keyCode = 8; }
+    else if (key === 'Delete') { code = 'Delete'; keyCode = 46; }
+    else if (key === ' ') { code = 'Space'; keyCode = 32; }
+    else if (key === 'ArrowUp') { code = 'ArrowUp'; keyCode = 38; }
+    else if (key === 'ArrowDown') { code = 'ArrowDown'; keyCode = 40; }
+    else if (key === 'ArrowLeft') { code = 'ArrowLeft'; keyCode = 37; }
+    else if (key === 'ArrowRight') { code = 'ArrowRight'; keyCode = 39; }
+    else if (key.length === 1) {
+      const charCode = key.toUpperCase().charCodeAt(0);
+      keyCode = charCode;
+      if (charCode >= 65 && charCode <= 90) {
+        code = 'Key' + key.toUpperCase();
+      } else if (charCode >= 48 && charCode <= 57) {
+        code = 'Digit' + key;
+      }
+    }
+
+    return { key, code, keyCode, ctrlKey, shiftKey, altKey, metaKey };
+  }
+
+  function simulateKeyPress(target, keySpec) {
+    const k = parseKeySpec(keySpec);
+    const opts = {
+      key: k.key,
+      code: k.code,
+      keyCode: k.keyCode,
+      which: k.keyCode,
+      ctrlKey: k.ctrlKey,
+      shiftKey: k.shiftKey,
+      altKey: k.altKey,
+      metaKey: k.metaKey,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      view: window
+    };
+
+    const downEv = new KeyboardEvent('keydown', opts);
+    const pressEv = new KeyboardEvent('keypress', opts);
+    const upEv = new KeyboardEvent('keyup', opts);
+
+    const cancelled = !target.dispatchEvent(downEv);
+    if (k.key.length === 1 || k.key === 'Enter') {
+      target.dispatchEvent(pressEv);
+    }
+
+    if (!cancelled) {
+      if (k.key === 'Enter') {
+        if (target.form) {
+          try {
+            if (typeof target.form.requestSubmit === 'function') {
+              target.form.requestSubmit();
+            } else {
+              target.form.submit();
+            }
+          } catch {}
+        }
+      } else if (k.key === 'Backspace') {
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+          const start = target.selectionStart;
+          const end = target.selectionEnd;
+          if (start !== null && end !== null && (start > 0 || start !== end)) {
+            const val = target.value;
+            const proto = target instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+            const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+            const newPos = start === end ? start - 1 : start;
+            const newVal = val.slice(0, newPos) + val.slice(end);
+            if (desc && desc.set) { desc.set.call(target, newVal); } else { target.value = newVal; }
+            target.setSelectionRange(newPos, newPos);
+            target.dispatchEvent(new Event('input', { bubbles: true }));
+            target.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        }
+      } else if (k.key.length === 1 && !k.ctrlKey && !k.metaKey && !k.altKey) {
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+          const start = target.selectionStart;
+          const end = target.selectionEnd;
+          if (start !== null && end !== null) {
+            const val = target.value;
+            const proto = target instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+            const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+            const newVal = val.slice(0, start) + k.key + val.slice(end);
+            if (desc && desc.set) { desc.set.call(target, newVal); } else { target.value = newVal; }
+            target.setSelectionRange(start + 1, start + 1);
+            target.dispatchEvent(new Event('input', { bubbles: true }));
+            target.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        } else if (target.isContentEditable) {
+          try {
+            document.execCommand('insertText', false, k.key);
+          } catch {}
+        }
+      }
+    }
+
+    target.dispatchEvent(upEv);
+    return `Pressed ${keySpec}`;
+  }
+
+  function domPress(keySpec, selector) {
+    let target = document.activeElement || document.body;
+    if (selector) {
+      target = findEl(selector);
+      try { target.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch {}
+      try { target.focus(); } catch {}
+    }
+    simulateKeyPress(target, keySpec);
+    return `Pressed '${keySpec}' on ${selector || target.tagName.toLowerCase()}`;
+  }
+
+  function domSendKeys(selector, text) {
+    let target = document.activeElement || document.body;
+    if (selector) {
+      target = findEl(selector);
+      try { target.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch {}
+      try { target.focus(); } catch {}
+    }
+    for (const char of text) {
+      simulateKeyPress(target, char);
+    }
+    return `Sent ${text.length} keys into ${selector || target.tagName.toLowerCase()}`;
   }
 
   function domWait(selector, timeoutMs) {

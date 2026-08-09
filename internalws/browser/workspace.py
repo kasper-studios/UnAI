@@ -378,6 +378,31 @@ class BrowserWorkspace(Workspace):
         return f"Text typed into '{selector}' successfully."
 
     @tool(
+        "browser.dom.press",
+        description="Press a keyboard key or key combination (e.g. 'Enter', 'Escape', 'Tab', 'Backspace', 'ArrowDown', 'ArrowUp', 'Space', 'Control+a'). Optionally target a CSS selector.",
+        arguments={
+            "key": {"type": "string", "description": "Key or key combination to press (e.g. 'Enter', 'Escape', 'Tab', 'Backspace', 'ArrowDown', 'Space', 'Control+a')"},
+            "selector": {"type": "string", "description": "Optional CSS selector of the element to receive keypress. If omitted, targets active focused element.", "default": ""}
+        }
+    )
+    async def dom_press(self, key: str, selector: str = "", reason: Optional[str] = None) -> str:
+        await self._send_request("dom.press", {"key": key, "selector": selector})
+        target_desc = f"'{selector}'" if selector else "focused element"
+        return f"Pressed key '{key}' on {target_desc} successfully."
+
+    @tool(
+        "browser.dom.send_keys",
+        description="Type text character-by-character into an input field or contenteditable element, firing keydown/keypress/keyup/input events for each character",
+        arguments={
+            "selector": {"type": "string", "description": "CSS selector of the element"},
+            "text": {"type": "string", "description": "Text sequence to type character by character"}
+        }
+    )
+    async def dom_send_keys(self, selector: str, text: str, reason: Optional[str] = None) -> str:
+        await self._send_request("dom.send_keys", {"selector": selector, "text": text})
+        return f"Sent keys '{text}' into '{selector}' successfully."
+
+    @tool(
         "browser.dom.wait",
         description="Wait for an element to appear on the page",
         arguments={

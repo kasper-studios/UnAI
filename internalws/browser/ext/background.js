@@ -145,6 +145,8 @@ async function dispatch(method, params, reqId) {
     case 'dom.query':
     case 'dom.click':
     case 'dom.type':
+    case 'dom.press':
+    case 'dom.send_keys':
     case 'dom.wait':
     case 'browser.storage.get':
     case 'browser.storage.set':
