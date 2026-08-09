@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
 import websockets
 from unai.sdk import Workspace, tool
 from unai.common.protocol import SettingsSchema, SettingItem
@@ -89,9 +90,20 @@ class BrowserWorkspace(Workspace):
             await asyncio.sleep(0.1)  # Даём сокету время забиндиться
 
     async def _start_server(self) -> None:
+        port = int(os.environ.get("UNAI_BROWSER_PORT", 8055))
         try:
-            async with websockets.serve(self._handle_client, "127.0.0.1", 8055):
+            async with websockets.serve(self._handle_client, "127.0.0.1", port):
                 await asyncio.Future()  # Держим сервер запущенным
+        except OSError as e:
+            import sys
+            if e.errno == 98 or "already in use" in str(e).lower():
+                print(
+                    f"[BrowserWorkspace] Port {port} is already in use by another UnAI/MCP instance. "
+                    "Skipping duplicate WebSocket server bind for this process.",
+                    file=sys.stderr,
+                )
+            else:
+                print(f"[BrowserWorkspace] WebSocket server error: {e}", file=sys.stderr)
         except Exception as e:
             import sys
             print(f"[BrowserWorkspace] WebSocket server error: {e}", file=sys.stderr)
