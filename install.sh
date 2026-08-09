@@ -42,6 +42,7 @@ if [ -n "$LATEST_RELEASE" ]; then
     echo "Found release ${LATEST_RELEASE}, downloading binary..."
 
     mkdir -p "$INSTALL_DIR"
+    rm -f "${INSTALL_DIR}/${BINARY_NAME}"
     if ! curl -fsSL "$DOWNLOAD_URL" -o "${INSTALL_DIR}/${BINARY_NAME}"; then
         # musl-бинрарь не вышел — пробуем gnu fallback (только linux, без падения в source build)
         if [ -n "$OS_FALLBACK" ]; then
@@ -81,6 +82,7 @@ if [ -z "$LATEST_RELEASE" ]; then
     cargo build --release --manifest-path unai-cli/Cargo.toml
     
     mkdir -p "$INSTALL_DIR"
+    rm -f "${INSTALL_DIR}/${BINARY_NAME}"
     cp "unai-cli/target/release/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
     chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
     
