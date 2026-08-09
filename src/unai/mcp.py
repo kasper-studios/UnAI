@@ -10,7 +10,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from mcp.server.fastmcp import FastMCP
 

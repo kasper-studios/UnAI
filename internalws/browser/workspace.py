@@ -224,6 +224,13 @@ class BrowserWorkspace(Workspace):
             if "error" in response:
                 raise RuntimeError(response["error"])
             return response.get("result")
+        except (websockets.exceptions.ConnectionClosed, Exception) as err:
+            if isinstance(err, websockets.exceptions.ConnectionClosed):
+                self._active_websocket = None
+                if self._is_master:
+                    self._browser_websocket = None
+                raise RuntimeError(f"WebSocket connection closed ({err}). KasperBridge re-connects automatically when tab active.")
+            raise
         finally:
             self._pending_requests.pop(req_id, None)
 
@@ -235,7 +242,7 @@ class BrowserWorkspace(Workspace):
         "browser.status",
         description="Get the status of the user-provided browser and check KasperBridge connection"
     )
-    async def status(self, **kwargs: Any) -> Dict[str, Any]:
+    async def status(self, reason: Optional[str] = None) -> Dict[str, Any]:
         await self._ensure_server_started()
         connected = self._active_websocket is not None
         if not connected:
@@ -277,7 +284,7 @@ class BrowserWorkspace(Workspace):
             "url": {"type": "string", "description": "URL to open", "default": "about:blank"}
         }
     )
-    async def open_browser(self, url: str = "about:blank", **kwargs: Any) -> str:
+    async def open_browser(self, url: str = "about:blank", reason: Optional[str] = None) -> str:
         await self._ensure_server_started()
         if self._active_websocket:
             await self._send_request("browser.navigate", {"url": url})
@@ -304,7 +311,7 @@ class BrowserWorkspace(Workspace):
             "url": {"type": "string", "description": "URL to navigate to"}
         }
     )
-    async def navigate(self, url: str, **kwargs: Any) -> str:
+    async def navigate(self, url: str, reason: Optional[str] = None) -> str:
         await self._send_request("browser.navigate", {"url": url})
         return f"Successfully navigated to {url}"
 
@@ -312,7 +319,7 @@ class BrowserWorkspace(Workspace):
         "browser.screenshot",
         description="Take a native screenshot of the visible page area via the browser extension"
     )
-    async def screenshot(self, **kwargs: Any) -> str:
+    async def screenshot(self, reason: Optional[str] = None) -> str:
         img_b64 = await self._send_request("browser.screenshot", {})
         
         import os
@@ -343,7 +350,7 @@ class BrowserWorkspace(Workspace):
             "selector": {"type": "string", "description": "CSS selector"}
         }
     )
-    async def dom_query(self, selector: str, **kwargs: Any) -> List[Dict[str, Any]]:
+    async def dom_query(self, selector: str, reason: Optional[str] = None) -> List[Dict[str, Any]]:
         result = await self._send_request("dom.query", {"selector": selector})
         return result
 
@@ -354,7 +361,7 @@ class BrowserWorkspace(Workspace):
             "selector": {"type": "string", "description": "CSS selector of the element to click"}
         }
     )
-    async def dom_click(self, selector: str, **kwargs: Any) -> str:
+    async def dom_click(self, selector: str, reason: Optional[str] = None) -> str:
         await self._send_request("dom.click", {"selector": selector})
         return f"Clicked element '{selector}' successfully."
 
@@ -366,7 +373,7 @@ class BrowserWorkspace(Workspace):
             "text": {"type": "string", "description": "Text to type"}
         }
     )
-    async def dom_type(self, selector: str, text: str, **kwargs: Any) -> str:
+    async def dom_type(self, selector: str, text: str, reason: Optional[str] = None) -> str:
         await self._send_request("dom.type", {"selector": selector, "text": text})
         return f"Text typed into '{selector}' successfully."
 
@@ -378,7 +385,7 @@ class BrowserWorkspace(Workspace):
             "timeout_ms": {"type": "integer", "description": "Timeout in milliseconds", "default": 5000}
         }
     )
-    async def dom_wait(self, selector: str, timeout_ms: int = 5000, **kwargs: Any) -> str:
+    async def dom_wait(self, selector: str, timeout_ms: int = 5000, reason: Optional[str] = None) -> str:
         await self._send_request("dom.wait", {"selector": selector, "timeout_ms": timeout_ms})
         return f"Element '{selector}' appeared on the page."
 
@@ -390,7 +397,7 @@ class BrowserWorkspace(Workspace):
         "browser.tabs.list",
         description="List all open browser tabs with their id, title, url, and active status"
     )
-    async def tabs_list(self, **kwargs: Any) -> List[Dict[str, Any]]:
+    async def tabs_list(self, reason: Optional[str] = None) -> List[Dict[str, Any]]:
         result = await self._send_request("browser.tabs.list", {})
         return result
 
@@ -401,7 +408,7 @@ class BrowserWorkspace(Workspace):
             "id": {"type": "integer", "description": "Tab ID or tab index to activate"}
         }
     )
-    async def tabs_activate(self, id: int, **kwargs: Any) -> Dict[str, Any]:
+    async def tabs_activate(self, id: int, reason: Optional[str] = None) -> Dict[str, Any]:
         result = await self._send_request("browser.tabs.activate", {"id": id})
         return result
 
@@ -412,7 +419,7 @@ class BrowserWorkspace(Workspace):
             "id": {"type": "integer", "description": "Tab ID to close"}
         }
     )
-    async def tabs_close(self, id: int, **kwargs: Any) -> Dict[str, Any]:
+    async def tabs_close(self, id: int, reason: Optional[str] = None) -> Dict[str, Any]:
         result = await self._send_request("browser.tabs.close", {"id": id})
         return result
 
@@ -428,7 +435,7 @@ class BrowserWorkspace(Workspace):
             "domain": {"type": "string", "description": "Domain to filter cookies (optional)", "default": ""}
         }
     )
-    async def cookies_list(self, url: str = "", domain: str = "", **kwargs: Any) -> List[Dict[str, Any]]:
+    async def cookies_list(self, url: str = "", domain: str = "", reason: Optional[str] = None) -> List[Dict[str, Any]]:
         params = {}
         if url:
             params["url"] = url
@@ -445,7 +452,7 @@ class BrowserWorkspace(Workspace):
             "name": {"type": "string", "description": "Cookie name"}
         }
     )
-    async def cookies_get(self, url: str, name: str, **kwargs: Any) -> Any:
+    async def cookies_get(self, url: str, name: str, reason: Optional[str] = None) -> Any:
         result = await self._send_request("browser.cookies.get", {"url": url, "name": name})
         return result
 
@@ -461,7 +468,7 @@ class BrowserWorkspace(Workspace):
         }
     )
     async def cookies_set(self, url: str, name: str, value: str,
-                          domain: str = "", path: str = "/", **kwargs: Any) -> Any:
+                          domain: str = "", path: str = "/", reason: Optional[str] = None) -> Any:
         params = {"url": url, "name": name, "value": value, "path": path}
         if domain:
             params["domain"] = domain
@@ -476,7 +483,7 @@ class BrowserWorkspace(Workspace):
             "name": {"type": "string", "description": "Cookie name to remove"}
         }
     )
-    async def cookies_remove(self, url: str, name: str, **kwargs: Any) -> Dict[str, Any]:
+    async def cookies_remove(self, url: str, name: str, reason: Optional[str] = None) -> Dict[str, Any]:
         result = await self._send_request("browser.cookies.remove", {"url": url, "name": name})
         return result
 
@@ -491,7 +498,7 @@ class BrowserWorkspace(Workspace):
             "key": {"type": "string", "description": "localStorage key (empty = get all)", "default": ""}
         }
     )
-    async def storage_get(self, key: str = "", **kwargs: Any) -> Any:
+    async def storage_get(self, key: str = "", reason: Optional[str] = None) -> Any:
         params = {"key": key if key else None}
         result = await self._send_request("browser.storage.get", params)
         return result
@@ -504,7 +511,7 @@ class BrowserWorkspace(Workspace):
             "value": {"type": "string", "description": "Value to store"}
         }
     )
-    async def storage_set(self, key: str, value: str, **kwargs: Any) -> str:
+    async def storage_set(self, key: str, value: str, reason: Optional[str] = None) -> str:
         await self._send_request("browser.storage.set", {"key": key, "value": value})
         return f"Saved '{key}' to localStorage."
 
@@ -519,7 +526,7 @@ class BrowserWorkspace(Workspace):
             "expression": {"type": "string", "description": "JavaScript expression to evaluate"}
         }
     )
-    async def devtools_eval(self, expression: str, **kwargs: Any) -> Any:
+    async def devtools_eval(self, expression: str, reason: Optional[str] = None) -> Any:
         result = await self._send_request("devtools.eval", {"expression": expression})
         return result
 
@@ -530,7 +537,7 @@ class BrowserWorkspace(Workspace):
             "limit": {"type": "integer", "description": "Max number of entries to return", "default": 50}
         }
     )
-    async def devtools_console(self, limit: int = 50, **kwargs: Any) -> List[Dict[str, Any]]:
+    async def devtools_console(self, limit: int = 50, reason: Optional[str] = None) -> List[Dict[str, Any]]:
         result = await self._send_request("devtools.console", {"limit": limit})
         return result
 
@@ -541,7 +548,7 @@ class BrowserWorkspace(Workspace):
             "limit": {"type": "integer", "description": "Max number of entries to return", "default": 100}
         }
     )
-    async def devtools_network(self, limit: int = 100, **kwargs: Any) -> List[Dict[str, Any]]:
+    async def devtools_network(self, limit: int = 100, reason: Optional[str] = None) -> List[Dict[str, Any]]:
         result = await self._send_request("devtools.network", {"limit": limit})
         return result
 
@@ -557,7 +564,7 @@ class BrowserWorkspace(Workspace):
             "selector": {"type": "string", "description": "CSS selector (default: 'body')", "default": "body"}
         }
     )
-    async def page_content(self, selector: str = "body", **kwargs: Any) -> str:
+    async def page_content(self, selector: str = "body", reason: Optional[str] = None) -> str:
         try:
             result = await self._send_request("browser.page.content", {"selector": selector})
         except Exception:
