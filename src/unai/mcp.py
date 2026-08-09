@@ -74,6 +74,16 @@ def _register_workspace_tools(ws_id: str, ws_path: Path) -> None:
         print(f"Error loading workspace {ws_id}: {e}", file=sys.stderr)
 
 
+def _parse_toml(manifest_file: Path) -> dict:
+    text = manifest_file.read_text()
+    try:
+        import tomllib
+        return tomllib.loads(text)
+    except ImportError:
+        import toml
+        return toml.loads(text)
+
+
 def load_internal_workspaces() -> None:
     """Load built-in workspaces from <runtime_dir>/internalws/."""
     runtime_dir = _find_runtime_dir()
@@ -93,8 +103,7 @@ def load_internal_workspaces() -> None:
 
         enabled = False
         try:
-            import toml
-            manifest = toml.loads(manifest_file.read_text())
+            manifest = _parse_toml(manifest_file)
             enabled = manifest.get("default_enabled", False)
         except Exception:
             pass
@@ -129,8 +138,7 @@ def load_enabled_workspaces() -> None:
             manifest_file = ws_path / "manifest.toml"
             if manifest_file.exists():
                 try:
-                    import toml
-                    manifest = toml.loads(manifest_file.read_text())
+                    manifest = _parse_toml(manifest_file)
                     enabled = manifest.get("default_enabled", False)
                 except Exception:
                     pass

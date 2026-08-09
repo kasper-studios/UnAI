@@ -1,7 +1,8 @@
+from __future__ import annotations
 import asyncio
 import base64
 import json
-from typing import Any, Dict, List, Optional
+import websockets
 from unai.sdk import Workspace, tool
 from unai.common.protocol import SettingsSchema, SettingItem
 
@@ -91,8 +92,9 @@ class BrowserWorkspace(Workspace):
         try:
             async with websockets.serve(self._handle_client, "127.0.0.1", 8055):
                 await asyncio.Future()  # Держим сервер запущенным
-        except Exception:
-            pass
+        except Exception as e:
+            import sys
+            print(f"[BrowserWorkspace] WebSocket server error: {e}", file=sys.stderr)
 
     async def _handle_client(self, websocket: Any, *args: Any, **kwargs: Any) -> None:
         self._active_websocket = websocket
