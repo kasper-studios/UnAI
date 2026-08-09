@@ -110,8 +110,10 @@ async function dispatch(method, params, reqId) {
     case 'browser.storage.get':
     case 'browser.storage.set':
     case 'devtools.eval':
-    case 'devtools.console':
+      return devtoolsEval(params.expression);
     case 'browser.page.content':
+      return pageContent(params.selector);
+    case 'devtools.console':
       return sendToActiveTab(method, params);
 
     // ---- DevTools: network — буфер в самом background
@@ -248,6 +250,53 @@ async function cookiesRemove(params) {
   if (!params.url || !params.name) throw new Error('cookies.remove requires url and name');
   await chrome.cookies.remove({ url: params.url, name: params.name });
   return { removed: params.name };
+}
+
+async function pageContent(selector) {
+  const tab = await getActiveTab();
+  try {
+    const [res] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      world: 'MAIN',
+      func: (sel) => {
+        const el = document.querySelector(sel || 'body');
+        if (!el) return '(element not found)';
+        return (el.innerText || el.textContent || '').trim();
+      },
+      args: [selector || 'body']
+    });
+    return res && res.result;
+  } catch (err) {
+    throw new Error(`page.content failed: ${err.message}`);
+  }
+}
+
+async function devtoolsEval(expression) {
+  const tab = await getActiveTab();
+  try {
+    const [res] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      world: 'MAIN',
+      func: (expr) => {
+        try {
+          const val = (0, eval)(expr);
+          if (val === undefined) return '__UNDEFINED__';
+          if (typeof val === 'function') return '[Function]';
+          try {
+            return JSON.parse(JSON.stringify(val));
+          } catch {
+            return String(val);
+          }
+        } catch (e) {
+          return { __error: String(e) };
+        }
+      },
+      args: [expression]
+    });
+    return res && res.result;
+  } catch (err) {
+    throw new Error(`devtools.eval failed: ${err.message}`);
+  }
 }
 
 // ---------------------------------------------------------------- content script bridge
