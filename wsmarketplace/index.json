@@ -4,5 +4,11 @@
     "ref": "main",
     "path": "workspace",
     "description": "Template workspace for UnAI — demonstrates packaging, install, lifecycle."
+  },
+  "discord": {
+    "repo": "kasper-studios/unai-discord-workspace",
+    "ref": "main",
+    "path": "workspace",
+    "description": "Native Discord workspace for autonomous AI agents — messages, channels, servers, members, attachments, notifications"
   }
 }
