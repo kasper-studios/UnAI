@@ -127,8 +127,15 @@ async function dispatch(method, params, reqId) {
 // ---------------------------------------------------------------- tabs
 
 async function getActiveTab() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab) throw new Error('No active tab');
+  let [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (!tab) {
+    [tab] = await chrome.tabs.query({ active: true });
+  }
+  if (!tab) {
+    const tabs = await chrome.tabs.query({});
+    tab = tabs[0];
+  }
+  if (!tab) throw new Error('No active tab found in browser');
   return tab;
 }
 
@@ -159,7 +166,10 @@ async function activateTab(idOrIndex) {
 }
 
 async function getTabByIndex(index) {
-  const tabs = await chrome.tabs.query({ currentWindow: true });
+  let tabs = await chrome.tabs.query({ lastFocusedWindow: true });
+  if (!tabs || tabs.length === 0) {
+    tabs = await chrome.tabs.query({});
+  }
   const tab = tabs[index];
   if (!tab) throw new Error(`No tab at index ${index}`);
   return tab;
