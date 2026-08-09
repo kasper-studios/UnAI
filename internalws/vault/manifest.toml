@@ -1,0 +1,6 @@
+id = "vault"
+name = "Vault, Secret Storage & 2FA Authenticator"
+version = "1.0.0"
+author = "UnAI Core Team"
+description = "Encrypted storage for login credentials, API keys/secrets, and TOTP 2FA code generation"
+default_enabled = true

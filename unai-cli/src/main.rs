@@ -48,6 +48,50 @@ enum Commands {
     Serve,
     /// Browser extension info and installation guide
     Extension,
+    /// Vault, secret storage & 2FA authenticator
+    Vault {
+        #[command(subcommand)]
+        command: VaultCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum VaultCmd {
+    /// Set a raw secret, API key, or token
+    Set {
+        #[arg(value_name = "NAME")]
+        name: String,
+        #[arg(value_name = "VALUE")]
+        value: String,
+    },
+    /// Get a secret or login credentials by name
+    Get {
+        #[arg(value_name = "NAME")]
+        name: String,
+    },
+    /// Add or update login credentials and optional 2FA TOTP secret
+    Add {
+        #[arg(value_name = "SERVICE")]
+        service: String,
+        #[arg(long, short = 'u')]
+        username: Option<String>,
+        #[arg(long, short = 'p')]
+        password: Option<String>,
+        #[arg(long, short = 't')]
+        totp: Option<String>,
+    },
+    /// List all stored secrets and credentials (masked)
+    List,
+    /// Remove a secret or service entry from vault
+    Remove {
+        #[arg(value_name = "NAME")]
+        name: String,
+    },
+    /// Generate current 6-digit TOTP 2FA code for a service
+    Totp {
+        #[arg(value_name = "SERVICE")]
+        service: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -158,6 +202,7 @@ fn main() -> Result<()> {
         Some(Commands::Config { id }) => cmd_config(&root, &id),
         Some(Commands::Serve) => cmd_serve(&root),
         Some(Commands::Extension) => cmd_extension(&root),
+        Some(Commands::Vault { command }) => cmd_vault(&root, command),
         None if cli.mcp => cmd_serve(&root),
         None => {
             println!(
@@ -274,6 +319,155 @@ fn cmd_extension(root: &PathBuf) -> Result<()> {
         "unai doctor".yellow().bold()
     );
 
+    Ok(())
+}
+
+fn cmd_vault(root: &PathBuf, cmd: VaultCmd) -> Result<()> {
+    let unai_home = dirs_home().join(".unai");
+    let runtime_dir = unai_home.join("src").join("main");
+
+    let python = venv_python(&runtime_dir)
+        .or_else(|| venv_python(root))
+        .or_else(|| Some(PathBuf::from("python3")))
+        .context("python3 not found")?;
+
+    let py_script = match cmd {
+        VaultCmd::Set { name, value } => {
+            format!(
+                r#"
+import asyncio
+from internalws.vault.workspace import VaultWorkspace
+ws = VaultWorkspace('vault')
+res = asyncio.run(ws.secret_set({}, {}))
+print(res)
+"#,
+                serde_json::to_string(&name)?,
+                serde_json::to_string(&value)?
+            )
+        }
+        VaultCmd::Get { name } => {
+            format!(
+                r#"
+import asyncio, json
+from internalws.vault.workspace import VaultWorkspace
+ws = VaultWorkspace('vault')
+res = asyncio.run(ws.credentials_get({}))
+if res:
+    print(json.dumps(res, indent=2, ensure_ascii=False))
+else:
+    sec = asyncio.run(ws.secret_get({}))
+    if sec:
+        print(sec)
+    else:
+        print(f"Entry '{name}' not found in vault")
+"#,
+                serde_json::to_string(&name)?,
+                serde_json::to_string(&name)?
+            )
+        }
+        VaultCmd::Add { service, username, password, totp } => {
+            format!(
+                r#"
+import asyncio
+from internalws.vault.workspace import VaultWorkspace
+ws = VaultWorkspace('vault')
+res = asyncio.run(ws.credentials_set({}, {}, {}, {}))
+print(res)
+"#,
+                serde_json::to_string(&service)?,
+                serde_json::to_string(&username.unwrap_or_default())?,
+                serde_json::to_string(&password.unwrap_or_default())?,
+                serde_json::to_string(&totp.unwrap_or_default())?
+            )
+        }
+        VaultCmd::List => {
+            format!(
+                r#"
+import asyncio
+from internalws.vault.workspace import VaultWorkspace
+ws = VaultWorkspace('vault')
+res = asyncio.run(ws.list_vault())
+print("\n  \033[1;36m⬡ UnAI Vault Items:\033[0m\n")
+secrets = res.get("secrets", [])
+if secrets:
+    print("  \033[1mSecrets / API Keys:\033[0m")
+    for s in secrets:
+        print(f"    • \033[33m{{s}}\033[0m")
+    print()
+
+creds = res.get("credentials", [])
+if creds:
+    print("  \033[1mCredentials:\033[0m")
+    for c in creds:
+        flags = []
+        if c.get("username"):
+            u = c['username']
+            flags.append(f"user: {{u}}")
+        if c.get("has_password"):
+            flags.append("password: ***")
+        if c.get("has_totp_2fa"):
+            flags.append("2FA: active")
+        fl = ', '.join(flags)
+        srv = c['service']
+        print(f"    • \033[36m{{srv}}\033[0m ({{fl}})")
+    print()
+
+if not secrets and not creds:
+    print("  (Vault is empty)\n")
+"#
+            )
+        }
+        VaultCmd::Remove { name } => {
+            format!(
+                r#"
+import asyncio
+from internalws.vault.workspace import VaultWorkspace
+ws = VaultWorkspace('vault')
+res = asyncio.run(ws.remove_entry({}))
+print(res)
+"#,
+                serde_json::to_string(&name)?
+            )
+        }
+        VaultCmd::Totp { service } => {
+            format!(
+                r#"
+import asyncio
+from internalws.vault.workspace import VaultWorkspace
+ws = VaultWorkspace('vault')
+try:
+    code = asyncio.run(ws.totp_code({}))
+    print(f"\n  2FA Code for '{service}': \033[1;36m{{code}}\033[0m\n")
+except Exception as e:
+    print(f"Error: {{e}}")
+"#,
+                serde_json::to_string(&service)?
+            )
+        }
+    };
+
+    let env_pythonpath = std::env::var("PYTHONPATH").unwrap_or_default();
+    let src_dir = runtime_dir.join("src");
+    let internalws_dir = runtime_dir;
+    let new_pythonpath = format!(
+        "{}:{}:{}",
+        src_dir.display(),
+        internalws_dir.display(),
+        env_pythonpath
+    );
+
+    let output = std::process::Command::new(python)
+        .arg("-c")
+        .arg(&py_script)
+        .env("PYTHONPATH", new_pythonpath)
+        .output()?;
+
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("Vault command failed: {err}");
+    }
+
+    print!("{}", String::from_utf8_lossy(&output.stdout));
     Ok(())
 }
 
