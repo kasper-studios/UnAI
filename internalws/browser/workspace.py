@@ -558,9 +558,12 @@ class BrowserWorkspace(Workspace):
         }
     )
     async def page_content(self, selector: str = "body") -> str:
-        # Use devtools.eval to extract text content from the page
-        expression = f"document.querySelector({json.dumps(selector)})?.innerText || ''"
-        result = await self._send_request("devtools.eval", {"expression": expression})
+        try:
+            result = await self._send_request("browser.page.content", {"selector": selector})
+        except Exception:
+            expression = f"document.querySelector({json.dumps(selector)})?.innerText || ''"
+            result = await self._send_request("devtools.eval", {"expression": expression})
+
         if isinstance(result, dict) and "__error" in result:
             return f"Error extracting page content: {result['__error']}"
         if isinstance(result, str):

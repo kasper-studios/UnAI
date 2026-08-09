@@ -81,6 +81,10 @@
           sendResponse({ result: storageSet(params.key, params.value) });
           break;
 
+        case 'browser.page.content':
+          sendResponse({ result: pageContent(params.selector) });
+          break;
+
         case 'devtools.eval':
           sendResponse({ result: evalInPage(params.expression) });
           break;
@@ -99,6 +103,13 @@
   });
 
   // ---- DOM helpers
+
+  function pageContent(selector) {
+    const sel = selector || 'body';
+    const el = document.querySelector(sel);
+    if (!el) return `(element not found for selector: ${sel})`;
+    return (el.innerText || el.textContent || '').trim();
+  }
 
   function findEl(selector) {
     const el = document.querySelector(selector);
@@ -177,11 +188,37 @@
     return `Saved: ${key}`;
   }
 
-  // ---- DevTools: eval в контексте СТРАНИЦЫ (не в изолированном content.js)
+  // ---- DevTools: eval в контексте СТРАНИЦЫ (с обходом CSP)
 
   function evalInPage(expression) {
+    // 1. Прямой eval в контексте content script (не блокируется CSP страницы!)
+    try {
+      const fn = new Function(`return (${expression});`);
+      const res = fn();
+      return serializeEvalResult(res);
+    } catch (e1) {
+      try {
+        const res = eval(expression);
+        return serializeEvalResult(res);
+      } catch (e2) {
+        // 2. Если прямой eval не сработал — проба через инжект <script>
+        return evalViaDOMScript(expression);
+      }
+    }
+  }
+
+  function serializeEvalResult(res) {
+    if (res === undefined) return '__UNDEFINED__';
+    if (typeof res === 'function') return '[Function]';
+    try {
+      return JSON.parse(JSON.stringify(res));
+    } catch {
+      return String(res);
+    }
+  }
+
+  function evalViaDOMScript(expression) {
     const script = document.createElement('script');
-    // JSON-сериализуем результат; ошибки — тоже в JSON
     script.textContent = `
       (function() {
         try {
@@ -195,16 +232,16 @@
         }
       })();
     `;
-    (document.head || document.documentElement).appendChild(script);
-    script.remove();
-
-    const raw = document.documentElement.getAttribute('data-unai-eval');
-    document.documentElement.removeAttribute('data-unai-eval');
-    if (raw === null) return { __error: 'no result' };
     try {
+      (document.head || document.documentElement).appendChild(script);
+      script.remove();
+
+      const raw = document.documentElement.getAttribute('data-unai-eval');
+      document.documentElement.removeAttribute('data-unai-eval');
+      if (raw === null) return { __error: 'Script injection blocked by page CSP' };
       return JSON.parse(raw);
-    } catch {
-      return { __error: 'parse failed', raw };
+    } catch (err) {
+      return { __error: String(err) };
     }
   }
 })();

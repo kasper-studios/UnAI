@@ -111,6 +111,7 @@ async function dispatch(method, params, reqId) {
     case 'browser.storage.set':
     case 'devtools.eval':
     case 'devtools.console':
+    case 'browser.page.content':
       return sendToActiveTab(method, params);
 
     // ---- DevTools: network — буфер в самом background
