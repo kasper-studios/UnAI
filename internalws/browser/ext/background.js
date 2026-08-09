@@ -109,12 +109,13 @@ async function dispatch(method, params, reqId) {
     case 'dom.wait':
     case 'browser.storage.get':
     case 'browser.storage.set':
+    case 'devtools.console':
+      return sendToActiveTab(method, params);
+
     case 'devtools.eval':
       return devtoolsEval(params.expression);
     case 'browser.page.content':
       return pageContent(params.selector);
-    case 'devtools.console':
-      return sendToActiveTab(method, params);
 
     // ---- DevTools: network — буфер в самом background
     case 'devtools.network': {
@@ -257,7 +258,7 @@ async function pageContent(selector) {
   try {
     const [res] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      world: 'MAIN',
+      world: 'ISOLATED',
       func: (sel) => {
         const el = document.querySelector(sel || 'body');
         if (!el) return '(element not found)';
@@ -273,13 +274,27 @@ async function pageContent(selector) {
 
 async function devtoolsEval(expression) {
   const tab = await getActiveTab();
+  if (!expression) throw new Error('devtools.eval requires expression');
+  
+  // 1. Try in MAIN world with Trusted Types policy support
   try {
     const [res] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       world: 'MAIN',
       func: (expr) => {
         try {
-          const val = (0, eval)(expr);
+          let code = expr;
+          if (window.trustedTypes && window.trustedTypes.createPolicy) {
+            try {
+              if (!window.__unaiTT) {
+                window.__unaiTT = window.trustedTypes.createPolicy('unaiPolicy', {
+                  createScript: (s) => s
+                });
+              }
+              code = window.__unaiTT.createScript(expr);
+            } catch (ttErr) {}
+          }
+          const val = (0, eval)(code);
           if (val === undefined) return '__UNDEFINED__';
           if (typeof val === 'function') return '[Function]';
           try {
@@ -293,9 +308,36 @@ async function devtoolsEval(expression) {
       },
       args: [expression]
     });
+    if (res && res.result && typeof res.result === 'object' && res.result.__error && res.result.__error.includes('Trusted Type')) {
+      throw new Error(res.result.__error);
+    }
     return res && res.result;
   } catch (err) {
-    throw new Error(`devtools.eval failed: ${err.message}`);
+    // 2. Fallback to ISOLATED extension world if MAIN world was blocked by Trusted Types
+    try {
+      const [resIso] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'ISOLATED',
+        func: (expr) => {
+          try {
+            const val = (0, eval)(expr);
+            if (val === undefined) return '__UNDEFINED__';
+            if (typeof val === 'function') return '[Function]';
+            try {
+              return JSON.parse(JSON.stringify(val));
+            } catch {
+              return String(val);
+            }
+          } catch (e) {
+            return { __error: String(e) };
+          }
+        },
+        args: [expression]
+      });
+      return resIso && resIso.result;
+    } catch (isoErr) {
+      throw new Error(`devtools.eval failed: ${err.message}`);
+    }
   }
 }
 
