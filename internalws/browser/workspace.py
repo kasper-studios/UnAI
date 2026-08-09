@@ -245,14 +245,28 @@ class BrowserWorkspace(Workspace):
                         "Please open any page in a browser with active KasperBridge "
                         "to auto-connect to ws://127.0.0.1:8055"
             }
+        
+        info = self._active_tab_info
+        try:
+            live = await self._send_request("browser.status", {})
+            if isinstance(live, dict):
+                info = live
+                self._active_tab_info = live
+        except Exception:
+            pass
+
+        tab_data = info.get("active_tab", {}) if isinstance(info.get("active_tab"), dict) else info
+        title = tab_data.get("title") or info.get("title") or "Unknown Page"
+        url = tab_data.get("url") or info.get("url") or "unknown"
+
         return {
             "connected": True,
-            "browser": self._active_tab_info.get("browser", "unknown"),
+            "browser": info.get("browser", "unknown"),
             "active_tab": {
-                "title": self._active_tab_info.get("title", "Unknown Page"),
-                "url": self._active_tab_info.get("url", "unknown")
+                "title": title,
+                "url": url
             },
-            "bridge_version": self._active_tab_info.get("version", "1.0.0"),
+            "bridge_version": info.get("version", "1.0.0"),
             "info": "Browser successfully provided by the user. Connection active."
         }
 
