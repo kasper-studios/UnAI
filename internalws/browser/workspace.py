@@ -44,6 +44,9 @@ class BrowserWorkspace(Workspace):
     def __init__(self, runtime_id: str, bus: Optional[Any] = None, **kwargs: Any):
         super().__init__(runtime_id, bus, **kwargs)
         self._active_websocket = None
+        self._browser_websocket = None
+        self._proxy_clients = set()
+        self._is_master = False
         self._active_tab_info = {}
         self._pending_requests = {}
         self._server_task = None
@@ -66,7 +69,10 @@ class BrowserWorkspace(Workspace):
             self._server_task.cancel()
             self._server_task = None
         if self._active_websocket:
-            await self._active_websocket.close()
+            try:
+                await self._active_websocket.close()
+            except Exception:
+                pass
             self._active_websocket = None
 
     def metadata(self) -> Dict[str, Any]:
@@ -93,44 +99,105 @@ class BrowserWorkspace(Workspace):
         port = int(os.environ.get("UNAI_BROWSER_PORT", 8055))
         try:
             async with websockets.serve(self._handle_client, "127.0.0.1", port):
+                self._is_master = True
                 await asyncio.Future()  # Держим сервер запущенным
         except OSError as e:
-            import sys
             if e.errno == 98 or "already in use" in str(e).lower():
-                print(
-                    f"[BrowserWorkspace] Port {port} is already in use by another UnAI/MCP instance. "
-                    "Skipping duplicate WebSocket server bind for this process.",
-                    file=sys.stderr,
-                )
+                self._is_master = False
+                await self._connect_as_proxy(port)
             else:
+                import sys
                 print(f"[BrowserWorkspace] WebSocket server error: {e}", file=sys.stderr)
         except Exception as e:
             import sys
             print(f"[BrowserWorkspace] WebSocket server error: {e}", file=sys.stderr)
 
+    async def _connect_as_proxy(self, port: int) -> None:
+        uri = f"ws://127.0.0.1:{port}"
+        while True:
+            try:
+                async with websockets.connect(uri) as ws:
+                    self._active_websocket = ws
+                    await ws.send(json.dumps({"type": "proxy_connect"}))
+                    async for message in ws:
+                        try:
+                            data = json.loads(message)
+                            req_id = data.get("id")
+                            if req_id and req_id in self._pending_requests:
+                                self._pending_requests[req_id].set_result(data)
+                            elif data.get("type") == "status":
+                                self._active_tab_info = data.get("status", {})
+                        except Exception:
+                            pass
+            except Exception:
+                await asyncio.sleep(2.0)
+            finally:
+                self._active_websocket = None
+                self._active_tab_info = {}
+
     async def _handle_client(self, websocket: Any, *args: Any, **kwargs: Any) -> None:
-        self._active_websocket = websocket
+        is_proxy = False
         try:
             async for message in websocket:
                 try:
                     data = json.loads(message)
                     req_id = data.get("id")
-                    
-                    # Если это ответ на наш запрос
+
+                    # Прокси-клиент идентифицирует себя
+                    if data.get("type") == "proxy_connect":
+                        is_proxy = True
+                        self._proxy_clients.add(websocket)
+                        if self._active_tab_info:
+                            await websocket.send(json.dumps({"type": "status", "status": self._active_tab_info}))
+                        continue
+
+                    # Если это ответ на наш прямой запрос или прокси-запрос
                     if req_id and req_id in self._pending_requests:
                         self._pending_requests[req_id].set_result(data)
-                    
-                    # Если это обновление статуса (от расширения)
+
+                    # Если прокси-клиент отправляет запрос для выполнения в браузере
+                    elif is_proxy and req_id and data.get("method"):
+                        if self._browser_websocket:
+                            fut = asyncio.get_running_loop().create_future()
+                            self._pending_requests[req_id] = fut
+                            await self._browser_websocket.send(json.dumps(data))
+                            try:
+                                resp = await asyncio.wait_for(fut, timeout=15.0)
+                                await websocket.send(json.dumps(resp))
+                            except Exception as err:
+                                await websocket.send(json.dumps({"id": req_id, "error": str(err)}))
+                            finally:
+                                self._pending_requests.pop(req_id, None)
+                        else:
+                            await websocket.send(json.dumps({"id": req_id, "error": "KasperBridge extension is not connected to Master UnAI instance"}))
+
+                    # Если это сообщение статуса от браузера
                     elif data.get("type") == "status":
+                        self._browser_websocket = websocket
+                        self._active_websocket = websocket
                         self._active_tab_info = data.get("status", {})
+                        # Бродкастим статус всем подключенным прокси
+                        for p in list(self._proxy_clients):
+                            try:
+                                await p.send(json.dumps({"type": "status", "status": self._active_tab_info}))
+                            except Exception:
+                                self._proxy_clients.discard(p)
+
                 except Exception:
                     pass
         except websockets.exceptions.ConnectionClosed:
             pass
         finally:
-            if self._active_websocket == websocket:
+            self._proxy_clients.discard(websocket)
+            if self._browser_websocket == websocket:
+                self._browser_websocket = None
                 self._active_websocket = None
                 self._active_tab_info = {}
+                for p in list(self._proxy_clients):
+                    try:
+                        asyncio.create_task(p.send(json.dumps({"type": "status", "status": {}})))
+                    except Exception:
+                        pass
 
     async def _send_request(self, method: str, params: dict) -> Any:
         await self._ensure_server_started()

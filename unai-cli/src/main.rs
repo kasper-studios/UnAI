@@ -46,6 +46,8 @@ enum Commands {
     },
     /// Start MCP server for connected AI agents
     Serve,
+    /// Browser extension info and installation guide
+    Extension,
 }
 
 #[derive(Subcommand)]
@@ -155,6 +157,7 @@ fn main() -> Result<()> {
         Some(Commands::Workspace { command }) => cmd_workspace(&root, command),
         Some(Commands::Config { id }) => cmd_config(&root, &id),
         Some(Commands::Serve) => cmd_serve(&root),
+        Some(Commands::Extension) => cmd_extension(&root),
         None if cli.mcp => cmd_serve(&root),
         None => {
             println!(
@@ -172,8 +175,12 @@ fn main() -> Result<()> {
                 "unai --help".yellow().bold()
             );
             println!(
-                "  Run {} to start the MCP server.\n",
+                "  Run {} to start the MCP server.",
                 "unai serve".yellow().bold()
+            );
+            println!(
+                "  Run {} for browser setup guide.\n",
+                "unai extension".yellow().bold()
             );
             Ok(())
         }
@@ -194,6 +201,79 @@ fn cmd_version(_root: &PathBuf) -> Result<()> {
             .magenta()
     );
     println!("{} {}", "protocol:".dimmed(), "1.0".magenta());
+    Ok(())
+}
+
+fn cmd_extension(root: &PathBuf) -> Result<()> {
+    let ext_dir = root.join("internalws").join("browser").join("ext");
+    let userscript = root.join("internalws").join("browser").join("bridge.user.js");
+
+    println!("\n{}  {}\n", "⬡".cyan().bold(), "KasperBridge — Browser Extension".cyan().bold());
+    println!(
+        "  {}",
+        "Connects the agent's designated browser to UnAI runtime via WebSocket.".dimmed()
+    );
+    println!();
+
+    // Extension directory
+    if ext_dir.exists() {
+        println!(
+            "  {} Extension directory:",
+            "📁".white()
+        );
+        println!(
+            "     {}\n",
+            ext_dir.display().to_string().cyan()
+        );
+    } else {
+        println!(
+            "  {} Extension directory {} — reinstall runtime ({}).\n",
+            "✗".red().bold(),
+            "NOT FOUND".red().bold(),
+            "unai update".yellow().bold()
+        );
+        return Ok(());
+    }
+
+    // Firefox instructions
+    println!("  {}  {}", "🦊".white(), "Firefox".white().bold());
+    println!("     1. Open {}", "about:debugging#/runtime/this-firefox".yellow());
+    println!("     2. Click {} → {}", "\"Load Temporary Add-on…\"".white(), "select any file inside:".dimmed());
+    println!("        {}", ext_dir.join("manifest.json").display().to_string().dimmed());
+    println!();
+
+    // Chrome / Chromium instructions
+    println!("  {}  {}", "🌐".white(), "Chrome / Chromium / Brave / Edge".white().bold());
+    println!("     1. Open {}", "chrome://extensions".yellow());
+    println!("     2. Enable {} (top-right toggle)", "\"Developer mode\"".white());
+    println!("     3. Click {} → select folder:", "\"Load unpacked\"".white());
+    println!("        {}", ext_dir.display().to_string().dimmed());
+    println!();
+
+    // Tampermonkey fallback
+    if userscript.exists() {
+        println!("  {}  {} {}", "🐒".white(), "Tampermonkey / Violentmonkey".white().bold(), "(alternative)".dimmed());
+        println!("     1. Install Tampermonkey extension in your browser");
+        println!("     2. Create a new script and paste the contents of:");
+        println!("        {}", userscript.display().to_string().dimmed());
+        println!();
+    }
+
+    // Connection status hint
+    println!(
+        "  {} After installing, open any page in the browser.",
+        "→".cyan().bold()
+    );
+    println!(
+        "    The extension auto-connects to {} ({})",
+        "ws://127.0.0.1:8055".cyan(),
+        "started by `unai serve`".dimmed()
+    );
+    println!(
+        "    Run {} to check connection status.\n",
+        "unai doctor".yellow().bold()
+    );
+
     Ok(())
 }
 
