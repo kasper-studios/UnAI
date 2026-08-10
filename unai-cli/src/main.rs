@@ -1342,11 +1342,24 @@ fn cmd_workspace_update(root: &PathBuf, id: &str) -> Result<()> {
             id, id
         );
     }
+    // Preserve existing state.json across updates
+    let state_path = workspace_state_path(root, id);
+    let saved_state = if state_path.exists() {
+        std::fs::read_to_string(&state_path).ok()
+    } else {
+        None
+    };
+
     // Переустановка: свежий пакет поверх старого (данные в ~/.unai/data не трогаем).
     let pkg = fetch_workspace_package(root, id, None)?;
     std::fs::remove_dir_all(&dest).context("remove old workspace dir")?;
     std::fs::create_dir_all(&dest).context("create workspace dir")?;
     copy_dir_recursive(&pkg, &dest)?;
+
+    if let Some(s) = saved_state {
+        std::fs::write(&state_path, s).ok();
+    }
+
     run_lifecycle_hook(root, id, &dest, "install")?;
     println!(
         "{} workspace {} updated (data preserved in {})",
@@ -1403,6 +1416,16 @@ fn workspace_default_enabled(root: &PathBuf, id: &str) -> bool {
     let internal_manifest = root.join("internalws").join(id).join("manifest.toml");
     if internal_manifest.exists() {
         if let Ok(content) = std::fs::read_to_string(&internal_manifest) {
+            if content.contains("default_enabled = true") {
+                return true;
+            }
+        }
+    }
+
+    // Check installed workspace manifest (~/.unai/workspaces/<id>/manifest.toml)
+    let installed_manifest = dirs_home().join(".unai").join("workspaces").join(id).join("manifest.toml");
+    if installed_manifest.exists() {
+        if let Ok(content) = std::fs::read_to_string(&installed_manifest) {
             if content.contains("default_enabled = true") {
                 return true;
             }
