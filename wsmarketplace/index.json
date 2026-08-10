@@ -10,5 +10,11 @@
     "ref": "main",
     "path": "workspace",
     "description": "Native Discord workspace for autonomous AI agents — messages, channels, servers, members, attachments, notifications"
+  },
+  "telegram": {
+    "repo": "kasper-studios/unai-telegram-workspace",
+    "ref": "main",
+    "path": "workspace",
+    "description": "Native Telegram workspace for autonomous AI agents — Bot API, chats, photos, documents, voice notes, profile updates, long polling"
   }
 }
