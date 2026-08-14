@@ -11,6 +11,10 @@ import json
 from pathlib import Path
 import sys
 from typing import Any, Dict, List
+import warnings
+
+# Suppress runtime warnings so stdio JSON-RPC remains completely clean
+warnings.filterwarnings("ignore")
 
 from mcp.server.fastmcp import FastMCP
 
