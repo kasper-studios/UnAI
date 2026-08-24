@@ -16,5 +16,11 @@
     "ref": "main",
     "path": "workspace",
     "description": "Native Telegram workspace for autonomous AI agents — Bot API, chats, photos, documents, voice notes, profile updates, long polling"
+  },
+  "minecraft": {
+    "repo": "kasper-studios/unai-minecraft-workspace",
+    "ref": "main",
+    "path": "workspace",
+    "description": "Native Minecraft Server Workspace for autonomous AI agents — console commands, chat, server status, player management"
   }
 }
